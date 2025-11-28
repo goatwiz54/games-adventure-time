@@ -27,10 +27,19 @@ const (
 )
 
 const (
-	DirNorth = 0 // Grid Y- (Screen Top-Right)
-	DirEast  = 1 // Grid X+ (Screen Bottom-Right)
-	DirSouth = 2 // Grid Y+ (Screen Bottom-Left)
-	DirWest  = 3 // Grid X- (Screen Top-Left)
+	DirNorth = 0
+	DirEast  = 1
+	DirSouth = 2
+	DirWest  = 3
+)
+
+// ゲームの状態定義
+type GameState int
+
+const (
+	StateMenu    GameState = iota // デバッグメニュー
+	StateWorld                    // ワールドマップ
+	StateDungeon                  // ダンジョン探索
 )
 
 var ZoomLevels = []float64{0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5}
@@ -44,15 +53,13 @@ func init() {
 	TexWhite = ebiten.NewImage(1, 1)
 	TexWhite.Fill(color.White)
 
-	// --- 矢印画像の生成 (高解像度 + MSAA) ---
+	// 矢印画像生成
 	size := 128
 	TexArrow = ebiten.NewImage(size, size)
 	orange := color.RGBA{255, 140, 0, 255}
 
 	isInArrow := func(x, y float64) bool {
-		// 軸: x[0, 64], y[48, 80]
 		if x >= 0 && x <= 64 && y >= 48 && y <= 80 { return true }
-		// 頭: x[64, 128]
 		if x >= 64 && x <= 128 {
 			topY := 0.75*x - 32
 			botY := -0.75*x + 160
@@ -77,7 +84,7 @@ func init() {
 		}
 	}
 
-	// --- テクスチャ自動生成 ---
+	// テクスチャ生成
 	genTex := func(baseColor color.RGBA, noiseAmount int, patternType int) *ebiten.Image {
 		img := ebiten.NewImage(32, 32)
 		pix := make([]byte, 32*32*4)
@@ -94,7 +101,6 @@ func init() {
 			} else {
 				if rng.Intn(8) == 0 { noise += 15 }
 			}
-			// Bevel
 			if x == 0 || y == 0 { noise += 40 } else if x == 31 || y == 31 { noise -= 40 }
 
 			r, g, b := clamp(br+noise), clamp(bg+noise), clamp(bb+noise)
@@ -166,7 +172,14 @@ type Camera struct {
 	ZoomIndex int
 }
 
+// ゲーム本体構造体
 type Game struct {
+	State GameState // 現在のシーン状態
+	
+	// Menu用
+	MenuIndex int
+
+	// Dungeon用
 	Dungeon *Dungeon
 	Party *Party
 	Camera *Camera
@@ -251,14 +264,27 @@ func (e *Enemy) CheckPlayerVisibility(px, py int) int {
 	return 3
 }
 
-// --- 5. ゲーム初期化 ---
+// --- 5. ゲーム初期化・生成 ---
 
 func NewGame() *Game {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	
-	// マップサイズを4倍に (20x20 -> 40x40)
+	// Game構造体の初期化（Menu状態からスタート）
+	g := &Game{
+		State: StateMenu,
+		MenuIndex: 0,
+		Rng: rng,
+	}
+	
+	// ダンジョンデータの初期化（バックグラウンドで準備しておく）
+	g.InitDungeon()
+	
+	return g
+}
+
+func (g *Game) InitDungeon() {
 	w, h := 40, 40
-	d := GenerateDungeon(w, h, rng)
+	d := GenerateDungeon(w, h, g.Rng)
 
 	leader := &Character{Name: "Denim", Stats: Status{AGI: 14}, BaseWT: 290, LoadWeight: 12.0, Facing: DirSouth}
 	px, py := 0, 0
@@ -276,12 +302,12 @@ Found:
 	leader.CurrentX, leader.CurrentY = float64(px), float64(py)
 	leader.CurrentZ = float64(leader.TargetZ)
 
-	party := &Party{Leader: leader, Members: []*Character{leader}}
-	cam := &Camera{ZoomIndex: 3} 
-
-	g := &Game{Dungeon: d, Party: party, Camera: cam, Rng: rng, Log: []string{"Quest Started."}, ArrowTimer: 0.3}
+	g.Dungeon = d
+	g.Party = &Party{Leader: leader, Members: []*Character{leader}}
+	g.Camera = &Camera{ZoomIndex: 3}
+	g.Log = []string{"Quest Started."}
+	g.ArrowTimer = 0.3
 	g.CenterCamera()
-	return g
 }
 
 func GenerateDungeon(w, h int, rng *rand.Rand) *Dungeon {
@@ -291,9 +317,8 @@ func GenerateDungeon(w, h int, rng *rand.Rand) *Dungeon {
 		for y := 0; y < h; y++ { d.Tiles[x][y] = Tile{Type: 0, Height: 0, Explored: false} }
 	}
 	
-	// 部屋数を増やす (マップ拡大に伴い)
 	var rooms []struct{x,y,w,h,z int}
-	count := 12 + rng.Intn(6) // 4+3 -> 12+6
+	count := 12 + rng.Intn(6)
 	
 	for i:=0; i<count; i++ {
 		rw, rh := 4+rng.Intn(4), 4+rng.Intn(4)
@@ -323,10 +348,8 @@ func GenerateDungeon(w, h int, rng *rand.Rand) *Dungeon {
 		rooms = append(rooms, struct{x,y,w,h,z int}{rx,ry,rw,rh,rz})
 	}
 	
-	// 敵数も増やす
-	enemyCount := 10 + rng.Intn(5) // 4+3 -> 10+5
+	enemyCount := 10 + rng.Intn(5)
 	for i := 0; i < enemyCount; i++ {
-		// ランダムな床を探す
 		for attempt := 0; attempt < 100; attempt++ {
 			ex := rng.Intn(w)
 			ey := rng.Intn(h)
@@ -346,26 +369,63 @@ func GenerateDungeon(w, h int, rng *rand.Rand) *Dungeon {
 	return d
 }
 
-// --- 6. 更新ループ ---
-
-func (g *Game) refreshArrow() {
-	if g.ArrowTimer >= 8.0 {
-		g.ArrowTimer = 0.0
-	} else {
-		g.ArrowTimer = 0.3
-	}
-}
+// --- 6. 更新ループ (State分岐) ---
 
 func (g *Game) Update() error {
+	switch g.State {
+	case StateMenu:
+		return g.UpdateMenu()
+	case StateWorld:
+		return g.UpdateWorld()
+	case StateDungeon:
+		return g.UpdateDungeon()
+	}
+	return nil
+}
+
+// Menu Update
+func (g *Game) UpdateMenu() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) {
+		g.MenuIndex--
+		if g.MenuIndex < 0 { g.MenuIndex = 1 }
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) {
+		g.MenuIndex++
+		if g.MenuIndex > 1 { g.MenuIndex = 0 }
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		if g.MenuIndex == 0 {
+			g.State = StateWorld
+		} else {
+			g.State = StateDungeon
+		}
+	}
+	return nil
+}
+
+// World Update (Placeholder)
+func (g *Game) UpdateWorld() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.State = StateMenu
+	}
+	return nil
+}
+
+// Dungeon Update
+func (g *Game) UpdateDungeon() error {
 	g.ArrowTimer += 1.0 / 60.0
+
+	// Esc to menu
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.State = StateMenu
+		return nil
+	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyF1) {
 		g.DebugMode = !g.DebugMode
 		g.Log = append(g.Log, fmt.Sprintf("Debug: %v", g.DebugMode))
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF3) {
-		g.refreshArrow()
-	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF3) { g.refreshArrow() }
 	if inpututil.IsKeyJustPressed(ebiten.KeyF12) {
 		if ebiten.IsKeyPressed(ebiten.KeyShift) {
 			g.Camera.ZoomIndex--
@@ -407,11 +467,9 @@ func (g *Game) Update() error {
 
 	if cameraChanged { g.refreshArrow() }
 
-	// Smooth Rotate
 	diff := g.Camera.TargetAngle - g.Camera.Angle
 	if math.Abs(diff) > 0.01 { 
 		g.Camera.Angle += diff * 0.1
-		// 回転中は常にプレイヤーを中心にカメラを合わせる
 		g.CenterCamera()
 	} else { 
 		g.Camera.Angle = g.Camera.TargetAngle 
@@ -572,38 +630,57 @@ func (g *Game) ProcessEnemyTurn() {
 	}
 }
 
+func (g *Game) refreshArrow() {
+	if g.ArrowTimer >= 8.0 {
+		g.ArrowTimer = 0.0
+	} else {
+		g.ArrowTimer = 0.3
+	}
+}
+
 func (g *Game) StartCombat(e *Enemy) {
 	g.Party.InCombat = true
 	g.Party.CombatLog = "ENCOUNTER! Press [R] to Reset."
 	g.Log = append(g.Log, "Battle Started!")
 }
 
-// --- 7. 描画 ---
-
-func (g *Game) GetScale() float64 { return ZoomLevels[g.Camera.ZoomIndex] / 0.8 }
-
-func (g *Game) CenterCamera() {
-	leader := g.Party.Leader
-	s := g.GetScale()
-	isoX, isoY := IsoToScreen(leader.CurrentX, leader.CurrentY, leader.CurrentZ, s, g.Camera.Angle)
-	g.Camera.X = -(isoX - ScreenWidth/2)
-	g.Camera.Y = -(isoY - ScreenHeight/2)
-}
-
-func IsoToScreen(x, y, z float64, scale float64, angle float64) (float64, float64) {
-	cos := math.Cos(angle)
-	sin := math.Sin(angle)
-	rx := x*cos - y*sin
-	ry := x*sin + y*cos
-	tw := float64(TileWidth) * scale
-	th := float64(TileHeight) * scale
-	sx := (rx - ry) * (tw / 2.0)
-	sy := (rx + ry) * (th / 2.0)
-	sy -= z * 16.0 * scale
-	return sx, sy
-}
+// --- 7. 描画 (State分岐) ---
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	switch g.State {
+	case StateMenu:
+		g.DrawMenu(screen)
+	case StateWorld:
+		g.DrawWorld(screen)
+	case StateDungeon:
+		g.DrawDungeon(screen)
+	}
+}
+
+func (g *Game) DrawMenu(screen *ebiten.Image) {
+	screen.Fill(color.RGBA{10, 10, 20, 255})
+	
+	title := "TACTICS DUNGEON RPG - DEBUG MENU"
+	text.Draw(screen, title, basicfont.Face7x13, ScreenWidth/2-120, ScreenHeight/3, color.White)
+
+	// Explicitly use color.Color type to avoid inference error
+	var c1, c2 color.Color = color.White, color.White
+	if g.MenuIndex == 0 { c1 = color.RGBA{255, 200, 0, 255} }
+	if g.MenuIndex == 1 { c2 = color.RGBA{255, 200, 0, 255} }
+
+	text.Draw(screen, "> 1. World Map (Under Construction)", basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2, c1)
+	text.Draw(screen, "> 2. Dungeon Exploration", basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2+30, c2)
+	
+	text.Draw(screen, "[Arrow keys]: Select, [Enter]: Start", basicfont.Face7x13, ScreenWidth/2-120, ScreenHeight-50, color.Gray{128})
+}
+
+func (g *Game) DrawWorld(screen *ebiten.Image) {
+	screen.Fill(color.RGBA{0, 20, 0, 255})
+	msg := "World Map Mode\n\n(Not implemented yet)\n\nPress [ESC] to return"
+	text.Draw(screen, msg, basicfont.Face7x13, ScreenWidth/2-80, ScreenHeight/2, color.White)
+}
+
+func (g *Game) DrawDungeon(screen *ebiten.Image) {
 	screen.Fill(color.RGBA{20, 25, 30, 255})
 	s := g.GetScale()
 	ang := g.Camera.Angle
@@ -688,7 +765,30 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			drawUnit(screen, sx+g.Camera.X, sy+g.Camera.Y, s, c, e.Facing, g.Camera.Angle, pcVis <= 1, arrowAlpha)
 		}
 	}
-	g.DrawUI(screen)
+	g.DrawDungeonUI(screen)
+}
+
+func (g *Game) GetScale() float64 { return ZoomLevels[g.Camera.ZoomIndex] / 0.8 }
+
+func (g *Game) CenterCamera() {
+	leader := g.Party.Leader
+	s := g.GetScale()
+	isoX, isoY := IsoToScreen(leader.CurrentX, leader.CurrentY, leader.CurrentZ, s, g.Camera.Angle)
+	g.Camera.X = -(isoX - ScreenWidth/2)
+	g.Camera.Y = -(isoY - ScreenHeight/2)
+}
+
+func IsoToScreen(x, y, z float64, scale float64, angle float64) (float64, float64) {
+	cos := math.Cos(angle)
+	sin := math.Sin(angle)
+	rx := x*cos - y*sin
+	ry := x*sin + y*cos
+	tw := float64(TileWidth) * scale
+	th := float64(TileHeight) * scale
+	sx := (rx - ry) * (tw / 2.0)
+	sy := (rx + ry) * (th / 2.0)
+	sy -= z * 16.0 * scale
+	return sx, sy
 }
 
 func drawTexturedBlock(screen *ebiten.Image, x, y float64, h int, scale float64) {
@@ -743,7 +843,7 @@ func drawUnit(screen *ebiten.Image, x, y float64, scale float64, c color.Color, 
 	}
 }
 
-func (g *Game) DrawUI(screen *ebiten.Image) {
+func (g *Game) DrawDungeonUI(screen *ebiten.Image) {
 	if g.Party.InCombat {
 		ebitenutil.DrawRect(screen, 0, ScreenHeight/2-40, ScreenWidth, 80, color.RGBA{150, 0, 0, 200})
 		text.Draw(screen, g.Party.CombatLog, basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2+5, color.White)
@@ -751,7 +851,7 @@ func (g *Game) DrawUI(screen *ebiten.Image) {
 	}
 	totalMins := g.Party.TotalTurns * BaseTurnToMin
 	zoomVal := ZoomLevels[g.Camera.ZoomIndex]
-	uiStr := fmt.Sprintf("Zoom: %.1fx [F12]  Time: %d min\n[F3]: Show Arrow", zoomVal, totalMins)
+	uiStr := fmt.Sprintf("Zoom: %.1fx [F12]  Time: %d min\n[F3]: Show Arrow  [ESC]: Menu", zoomVal, totalMins)
 	ebitenutil.DrawRect(screen, 0, 0, 200, 60, color.RGBA{0, 0, 0, 180})
 	text.Draw(screen, uiStr, basicfont.Face7x13, 10, 20, color.White)
 
@@ -777,7 +877,7 @@ func (g *Game) Layout(w, h int) (int, int) {
 
 func main() {
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
-	ebiten.SetWindowTitle("Tactics Dungeon: 4x Map & Rotation")
+	ebiten.SetWindowTitle("Tactics Dungeon: Debug Menu")
 	if err := ebiten.RunGame(NewGame()); err != nil {
 		log.Fatal(err)
 	}
