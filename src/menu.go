@@ -18,8 +18,8 @@ func (g *Game) UpdateMenu() error {
 		} else if g.MenuIndex == 1 {
 			g.State = StateDungeon
 		} else if g.MenuIndex == 2 {
-			// サイズ指定付きで生成
-			g.World2 = GenerateWorld2(g.Rng, g.SoilMin, g.SoilMax, g.W2Width, g.W2Height, g)
+			// 修正: 一括生成関数ではなく、生成器の初期化メソッドを呼ぶ
+			g.InitWorld2Generator()
 			g.State = StateWorld2
 		}
 	}
@@ -35,5 +35,5 @@ func (g *Game) DrawMenu(screen *ebiten.Image) {
 	if g.MenuIndex == 2 { c3 = color.RGBA{255, 200, 0, 255} }
 	text.Draw(screen, "> 1. World Map 1 (Globe)", basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2, c1)
 	text.Draw(screen, "> 2. Dungeon", basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2+30, c2)
-	text.Draw(screen, "> 3. World Map 2 (Flat/Zoom)", basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2+60, c3)
+	text.Draw(screen, "> 3. World Map 2 (Step Gen)", basicfont.Face7x13, ScreenWidth/2-100, ScreenHeight/2+60, c3)
 }

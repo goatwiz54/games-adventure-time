@@ -17,15 +17,15 @@ const (
 	BaseTurnToMin = 6
 	MoveSpeed     = 0.20
 
-	// World Map 1 Constants
 	WorldWidth    = 100
 	WorldHeight   = 80
 	WorldTileSize = 32
 
-	// World Map 2 Constants
-	World2Width    = 100
-	World2Height   = 100
-	World2TileSize = 16
+	World2Width         = 150
+	World2Height        = 100
+	DefaultWorld2Width  = 150
+	DefaultWorld2Height = 100
+	World2TileSize      = 16
 )
 
 const (
@@ -37,10 +37,22 @@ const (
 
 // World 2 Tile Types
 const (
-	W2TileVariableOcean = 0 // 可変海
-	W2TileSoil          = 1 // 土
-	W2TileFixedOcean    = 2 // 固定海
-	W2TileTransit       = 3 // 経由島 (New)
+	W2TileVariableOcean = 0 
+	W2TileSoil          = 1 
+	W2TileFixedOcean    = 2 
+	W2TileTransit       = 3 
+	W2TileCliff         = 4
+	W2TileShallow       = 5
+)
+
+// World 2 Soil Source
+const (
+	SrcNone    = 0
+	SrcMain    = 1 
+	SrcSub     = 2 
+	SrcMix     = 3 
+	SrcBridge  = 4 
+	SrcIsland  = 5 
 )
 
 // Input Edit Modes
@@ -50,6 +62,14 @@ const (
 	EditSoilMax = 2
 	EditW2Width = 3
 	EditW2Height = 4
+	EditTransitDist = 5
+	EditMapTypeMain = 6
+	EditMapTypeSub  = 7
+	EditMapRatio    = 8
+	EditCentering   = 9
+	EditCliffInit   = 10
+	EditCliffDec    = 11
+	EditShallowDec  = 12
 )
 
 var ZoomLevels = []float64{0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5}
@@ -59,10 +79,10 @@ type GameState int
 
 const (
 	StateMenu         GameState = iota
-	StateWorldLoading           // World 1 生成
-	StateWorld                  // World 1
-	StateDungeon                // ダンジョン
-	StateWorld2                 // World 2
+	StateWorldLoading           
+	StateWorld                  
+	StateDungeon                
+	StateWorld2                 
 )
 
 // --- リソース ---
@@ -130,10 +150,16 @@ type WorldMap struct {
 }
 
 // World 2
+type Rect struct {
+	x, y, w, h int
+}
+
 type World2Tile struct {
 	Type   int
+	Source int
 	IsLake bool
 }
+
 type WorldMap2 struct {
 	Width, Height    int
 	Tiles            [][]World2Tile
@@ -141,6 +167,47 @@ type WorldMap2 struct {
 	Zoom             float64
 	ShowGrid         bool
 	StatsInfo        []string
+	PinkRects        []Rect
+}
+
+// --- 生成管理用 ---
+type GenSnapshot struct {
+	Tiles     [][]World2Tile
+	PhaseName string
+	StepID    int
+	// その他の状態も復元したい場合はここに追加
+	StatsInfo []string
+	NewSoils  map[int]bool
+}
+
+type World2Generator struct {
+	CurrentStep int
+	IsFinished  bool
+	PhaseName   string
+	
+	History      []GenSnapshot
+	HistoryIndex int // 現在表示中の履歴インデックス (New)
+	
+	Rng             *rand.Rand
+	MaskMain        [][]float64
+	MaskSub         [][]float64
+	FinalMask       [][]float64
+	Walkers         []struct{ x, y int }
+	TargetSoilCount int
+	CurrentSoilCount int
+	Config          GenConfig
+	
+	NewSoils map[int]bool
+	
+	Multiplier float64
+	Excluded   map[int]bool
+}
+
+type GenConfig struct {
+	MinPct, MaxPct, W, H, TransitDist, MainType, SubType, Ratio int
+	VastOcean, IslandBound int
+	Centering bool
+	CliffInit, CliffDec, ShallowDec float64
 }
 
 // --- システム ---
@@ -166,6 +233,7 @@ type Game struct {
 	Loader *LoadingState
 	World *WorldMap
 	World2 *WorldMap2
+	Gen2 *World2Generator
 	Dungeon *Dungeon
 	Party *Party
 	Camera *Camera
@@ -176,16 +244,27 @@ type Game struct {
 	IsDragging bool
 	ArrowTimer float64
 	
-	// World 2 Generation Settings
-	SoilMin   int
-	SoilMax   int
-	W2Width   int
-	W2Height  int
+	SoilMin     int
+	SoilMax     int
+	W2Width     int
+	W2Height    int
+	TransitDist int
+	VastOceanSize   int
+	IslandBoundSize int
+	
+	MapTypeMain int 
+	MapTypeSub  int 
+	MapRatio    int 
+	EnableCentering bool
+	
+	CliffInitVal   float64
+	CliffDecVal    float64
+	ShallowDecVal  float64
+	
 	LastTargetSoil int
 	InputMode int
 	InputBuffer string
 
-	// Warning
 	WarningMsg   string
 	WarningTimer float64
 }

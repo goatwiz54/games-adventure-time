@@ -44,7 +44,6 @@ func init() {
 	genTex := func(baseColor color.RGBA, noiseAmount int, patternType int) *ebiten.Image {
 		img := ebiten.NewImage(32, 32)
 		pix := make([]byte, 32*32*4)
-		// 固定シードのための簡易乱数
 		seed := int64(1)
 		rnd := func() int {
 			seed = seed * 1664525 + 1013904223
@@ -73,7 +72,7 @@ func init() {
 	TexDirt  = genTex(color.RGBA{100, 80, 60, 255}, 15, 1)
 	TexStone = genTex(color.RGBA{100, 100, 110, 255}, 10, 2)
 
-	// World 1
+	// World 1 Icons
 	TexW_MountainIcon = ebiten.NewImage(32, 32)
 	for y := 10; y < 30; y++ { for x := 4; x < 28; x++ { if y >= int(math.Abs(float64(x-16))*1.2)+10 { TexW_MountainIcon.Set(x, y, color.RGBA{100, 90, 80, 255}) } } }
 	TexW_TreeIcon = ebiten.NewImage(16, 16)

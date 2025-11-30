@@ -15,22 +15,31 @@ func NewGame() *Game {
 		State: StateMenu, 
 		MenuIndex: 0, 
 		Rng: rng,
-		// World 2 初期設定
-		SoilMin: 25,
-		SoilMax: 45,
+		// World 2 Init
+		SoilMin: 20,
+		SoilMax: 28,
 		W2Width: DefaultWorld2Width,
 		W2Height: DefaultWorld2Height,
+		TransitDist: 15,
+		VastOceanSize: 25,
+		IslandBoundSize: 15,
+		
+		MapTypeMain: 1, 
+		MapTypeSub:  1, 
+		MapRatio:    10,
+		EnableCentering: true,
+
+		// Cliff Params Default
+		CliffInitVal:  10.0,
+		CliffDecVal:   0.1,
+		ShallowDecVal: 0.25,
 	}
 	g.InitDungeon()
 	return g
 }
 
 func (g *Game) Update() error {
-	// 警告タイマーの更新
-	if g.WarningTimer > 0 {
-		g.WarningTimer -= 1.0 / 60.0
-	}
-
+	if g.WarningTimer > 0 { g.WarningTimer -= 1.0 / 60.0 }
 	switch g.State {
 	case StateMenu: return g.UpdateMenu()
 	case StateWorldLoading: g.UpdateLoading(); return nil
@@ -55,6 +64,6 @@ func (g *Game) Layout(w, h int) (int, int) { return ScreenWidth, ScreenHeight }
 
 func main() {
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
-	ebiten.SetWindowTitle("Tactics Dungeon: Resizable World")
+	ebiten.SetWindowTitle("Tactics Dungeon: Cliff Params")
 	if err := ebiten.RunGame(NewGame()); err != nil { log.Fatal(err) }
 }

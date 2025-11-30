@@ -93,12 +93,7 @@ func (g *Game) UpdateDungeon() error {
 	if cameraChanged { g.refreshArrow() }
 	diff := g.Camera.TargetAngle - g.Camera.Angle
 	if math.Abs(diff) > 0.01 { g.Camera.Angle += diff * 0.1; g.CenterCamera() } else { g.Camera.Angle = g.Camera.TargetAngle }
-
-	animate := func(curr *float64, target int) bool {
-		d := float64(target) - *curr
-		if math.Abs(d) < 0.05 { *curr = float64(target); return false }
-		*curr += d * MoveSpeed; return true
-	}
+	animate := func(curr *float64, target int) bool { d := float64(target) - *curr; if math.Abs(d) < 0.05 { *curr = float64(target); return false }; *curr += d * MoveSpeed; return true }
 	leader := g.Party.Leader
 	imX := animate(&leader.CurrentX, leader.TargetX); imY := animate(&leader.CurrentY, leader.TargetY); imZ := animate(&leader.CurrentZ, leader.TargetZ)
 	leader.IsMoving = imX || imY || imZ
