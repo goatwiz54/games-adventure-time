@@ -33,6 +33,8 @@ func NewGame() *Game {
 		CliffInitVal:  10.0,
 		CliffDecVal:   0.1,
 		ShallowDecVal: 0.25,
+		CliffPathLen:  5, // New
+		ForceSwitch:   5, // New
 	}
 	g.InitDungeon()
 	return g
@@ -58,12 +60,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	case StateDungeon: g.DrawDungeon(screen)
 	case StateWorld2: g.DrawWorld2(screen)
 	}
+	
+	DrawMemoryStats(screen)
 }
 
 func (g *Game) Layout(w, h int) (int, int) { return ScreenWidth, ScreenHeight }
 
 func main() {
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
-	ebiten.SetWindowTitle("Tactics Dungeon: Cliff Params")
+	ebiten.SetWindowTitle("Tactics Dungeon: Cliff Logic Update")
 	if err := ebiten.RunGame(NewGame()); err != nil { log.Fatal(err) }
 }

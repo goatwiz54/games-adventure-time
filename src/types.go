@@ -35,7 +35,6 @@ const (
 	DirWest  = 3
 )
 
-// World 2 Tile Types
 const (
 	W2TileVariableOcean = 0 
 	W2TileSoil          = 1 
@@ -45,7 +44,6 @@ const (
 	W2TileShallow       = 5
 )
 
-// World 2 Soil Source
 const (
 	SrcNone    = 0
 	SrcMain    = 1 
@@ -63,13 +61,15 @@ const (
 	EditW2Width = 3
 	EditW2Height = 4
 	EditTransitDist = 5
-	EditMapTypeMain = 6
-	EditMapTypeSub  = 7
-	EditMapRatio    = 8
-	EditCentering   = 9
-	EditCliffInit   = 10
-	EditCliffDec    = 11
-	EditShallowDec  = 12
+	EditCentering   = 6
+	EditCliffInit   = 7
+	EditCliffDec    = 8
+	EditShallowDec  = 9
+	EditCliffPath   = 10 // New
+	EditForceSwitch = 11 // New
+	EditMapTypeMain = 12
+	EditMapTypeSub = 13
+	EditMapRatio = 14
 )
 
 var ZoomLevels = []float64{0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5}
@@ -93,7 +93,6 @@ var (
 	TexW2_Ocean, TexW2_Soil, TexW2_FixedOcean          *ebiten.Image
 )
 
-// --- キャラクター・パーティ ---
 type Status struct{ HP, SP, STR, DEX, VIT, INT, AGI, SPD, LUCK int }
 
 type Character struct {
@@ -125,7 +124,6 @@ type Enemy struct {
 	Active     bool
 }
 
-// --- マップデータ ---
 type Tile struct {
 	Type, Height int
 	Explored     bool
@@ -137,7 +135,6 @@ type Dungeon struct {
 	Enemies       []*Enemy
 }
 
-// World 1
 type WorldTile struct {
 	Biome  int
 	Height float64
@@ -149,7 +146,6 @@ type WorldMap struct {
 	Zoom             float64
 }
 
-// World 2
 type Rect struct {
 	x, y, w, h int
 }
@@ -163,35 +159,45 @@ type World2Tile struct {
 type WorldMap2 struct {
 	Width, Height    int
 	Tiles            [][]World2Tile
-	OffsetX, OffsetY float64
+	OffsetX, OffsetY float64 // 修正: 次のフィールドと正しく分離
 	Zoom             float64
 	ShowGrid         bool
 	StatsInfo        []string
 	PinkRects        []Rect
-}
+} // <- 修正により、この位置でEOFエラーが解消します。
 
-// --- 生成管理用 ---
 type GenSnapshot struct {
 	Tiles     [][]World2Tile
 	PhaseName string
 	StepID    int
-	// その他の状態も復元したい場合はここに追加
-	StatsInfo []string
-	NewSoils  map[int]bool
+	
+	NewSoils         map[int]bool
+	PinkRects        []Rect
+	Walkers          []struct{x, y int}
+	CurrentSoilCount int
+	Multiplier       float64
+	Excluded         map[int]bool
+	CurrentSeed      int64
+	
+	CliffStreak   int
+	ShallowStreak int
 }
 
 type World2Generator struct {
 	CurrentStep int
 	IsFinished  bool
 	PhaseName   string
-	
-	History      []GenSnapshot
-	HistoryIndex int // 現在表示中の履歴インデックス (New)
+	History     []GenSnapshot
 	
 	Rng             *rand.Rand
+	CurrentSeed     int64
+
 	MaskMain        [][]float64
 	MaskSub         [][]float64
 	FinalMask       [][]float64
+	
+	MaskImage       *ebiten.Image 
+
 	Walkers         []struct{ x, y int }
 	TargetSoilCount int
 	CurrentSoilCount int
@@ -199,8 +205,11 @@ type World2Generator struct {
 	
 	NewSoils map[int]bool
 	
-	Multiplier float64
+	Multiplier float64 // 修正: 次のフィールドと正しく分離
 	Excluded   map[int]bool
+	
+	CliffStreak   int
+	ShallowStreak int
 }
 
 type GenConfig struct {
@@ -208,9 +217,9 @@ type GenConfig struct {
 	VastOcean, IslandBound int
 	Centering bool
 	CliffInit, CliffDec, ShallowDec float64
+	CliffPathLen, ForceSwitch int
 }
 
-// --- システム ---
 type Camera struct {
 	X, Y, Angle, TargetAngle float64
 	ZoomIndex                int
@@ -260,6 +269,8 @@ type Game struct {
 	CliffInitVal   float64
 	CliffDecVal    float64
 	ShallowDecVal  float64
+	CliffPathLen   int
+	ForceSwitch    int
 	
 	LastTargetSoil int
 	InputMode int
