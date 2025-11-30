@@ -24,8 +24,7 @@ func NewGame() *Game {
 		VastOceanSize: 25,
 		IslandBoundSize: 15,
 		
-		MapTypeMain: 1, 
-		MapTypeSub:  1, 
+		// MapTypeMain, MapTypeSub は固定値 1 のため削除
 		MapRatio:    10,
 		EnableCentering: true,
 

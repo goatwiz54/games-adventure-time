@@ -11,8 +11,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/hajimehoshi/ebiten/v2/text"
 	"golang.org/x/image/font/basicfont"
+	"github.com/hajimehoshi/ebiten/v2/text"
 )
 
 // GenerateMask: タイプごとの形状マスクを生成 (0.0~1.0)
@@ -137,10 +137,12 @@ func (g *Game) InitWorld2Generator() {
 			MinPct: g.SoilMin, MaxPct: g.SoilMax, W: g.W2Width, H: g.W2Height,
 			TransitDist: g.TransitDist,
 			VastOcean: g.VastOceanSize, IslandBound: g.IslandBoundSize,
-			MainType: g.MapTypeMain, SubType: g.MapTypeSub, Ratio: g.MapRatio,
+			// MapTypeMain, MapTypeSub は固定値 1
+			MainType: 1, SubType: 1, Ratio: g.MapRatio, 
 			Centering: g.EnableCentering,
 			CliffInit: g.CliffInitVal, CliffDec: g.CliffDecVal, ShallowDec: g.ShallowDecVal,
-			CliffPathLen: g.CliffPathLen, ForceSwitch: g.ForceSwitch,
+			CliffPathLen: g.CliffPathLen,
+			ForceSwitch: g.ForceSwitch,
 		},
 		Multiplier: g.CliffInitVal,
 		Excluded:   make(map[int]bool),
@@ -159,6 +161,9 @@ func (g *Game) InitWorld2Generator() {
 	}
 
 	g.Gen2 = gen
+	g.Gen2IsPaused = false
+	g.Gen2PausedQuadID = -1 
+	g.Gen2PausedIslandCenter = struct{x, y int}{0, 0}
 	g.Gen2.UpdateMaskImage(g.W2Width, g.W2Height)
 	g.SaveSnapshot()
 }
@@ -211,7 +216,10 @@ func (g *Game) UndoStep() {
 		g.Gen2.PhaseName = last.PhaseName
 		g.Gen2.CurrentStep = last.StepID
 		g.Gen2.IsFinished = false
-		
+		g.Gen2IsPaused = false
+		g.Gen2PausedQuadID = -1 
+		g.Gen2PausedIslandCenter = struct{x, y int}{0, 0}
+
 		g.Gen2.NewSoils = make(map[int]bool)
 		for k, v := range last.NewSoils { g.Gen2.NewSoils[k] = v }
 		
@@ -233,8 +241,140 @@ func (g *Game) UndoStep() {
 	}
 }
 
+// Phase_IslandsQuad のロジックをポーズ/再実行対応のために分離
+func (g *Game) processIslandsQuadStep(w, h int, rng *rand.Rand, gen *World2Generator) {
+	vastSize := gen.Config.VastOcean
+	boundSize := gen.Config.IslandBound
+	
+	placeSoil := func(x, y int, src int) {
+		if x >= 3 && x < w-3 && y >= 3 && y < h-3 {
+			g.World2.Tiles[x][y].Type = W2TileSoil
+			g.World2.Tiles[x][y].Source = src
+			gen.NewSoils[y*w+x] = true
+		}
+	}
+	
+	// 1. ポーズが解除された後の島の生成処理
+	if !g.Gen2IsPaused && g.Gen2PausedQuadID != -1 {
+		// 前回ポーズした場所で島生成を完了させる
+		cx := g.Gen2PausedIslandCenter.x
+		cy := g.Gen2PausedIslandCenter.y
+		
+		area := boundSize * boundSize
+		ratio := 0.3 + rng.Float64()*0.4
+		tgt := int(math.Round(float64(area) * ratio))
+		cnt := 0
+		wx, wy := cx, cy
+		halfBound := boundSize / 2
+		for cnt < tgt {
+			placeSoil(wx, wy, SrcIsland)
+			cnt++
+			dir := rng.Intn(4)
+			switch dir {
+			case 0: wy--
+			case 1: wx++
+			case 2: wy++
+			case 3: wx--
+			}
+			if wx < cx-halfBound { wx = cx - halfBound }
+			if wx > cx+halfBound { wx = cx + halfBound }
+			if wy < cy-halfBound { wy = cy - halfBound }
+			if wy > cy+halfBound { wy = cy + halfBound }
+		}
+
+		// 処理完了後、ポーズ情報をクリアし、次のフェーズへ進む
+		g.Gen2PausedQuadID = -1
+		g.Gen2PausedIslandCenter = struct{x, y int}{0, 0}
+		g.Gen2.CurrentStep = Phase_IslandsRand
+		gen.PhaseName = "7. Islands (Random)"
+		return
+	}
+	
+	// 2. 初期/継続的な広い海探索
+	quadrants := []int{0, 1, 2, 3}
+	created := 0
+	
+	findVast := func(qid int) (int, int, bool) {
+		var sx, sy, ex, ey int
+		halfW, halfH := w/2, h/2
+		switch qid {
+		case 0: sx, sy, ex, ey = 3, 3, halfW, halfH
+		case 1: sx, sy, ex, ey = halfW, 3, w-3, halfH
+		case 2: sx, sy, ex, ey = 3, halfH, halfW, h-3
+		case 3: sx, sy, ex, ey = halfW, halfH, w-3, h-3
+		}
+		for try := 0; try < 30; try++ {
+			cx := sx + rng.Intn(ex-sx)
+			cy := sy + rng.Intn(ey-sy)
+			halfVast := vastSize / 2
+			isVast := true
+			
+			vastRect := Rect{x: cx - halfVast, y: cy - halfVast, w: vastSize, h: vastSize}
+			g.World2.PinkRects = append(g.World2.PinkRects, vastRect)
+			
+			for dy := -halfVast; dy <= halfVast; dy++ {
+				for dx := -halfVast; dx <= halfVast; dx++ {
+					tx, ty := cx+dx, cy+dy
+					if tx < 3 || tx >= w-3 || ty < 3 || ty >= h-3 {
+						isVast = false
+						break
+					}
+					if g.World2.Tiles[tx][ty].Type != W2TileVariableOcean {
+						isVast = false
+						break
+					}
+				}
+				if !isVast { break }
+			}
+			
+			if isVast { 
+				g.Gen2IsPaused = true 
+				g.Gen2PausedQuadID = qid 
+				g.Gen2PausedIslandCenter = struct{x, y int}{cx, cy}
+				return cx, cy, true 
+			} else {
+				g.World2.PinkRects = []Rect{}
+			}
+		}
+		return 0, 0, false
+	}
+	
+	// 3. 島の探索と生成ループ
+	for created < 4 && len(quadrants) > 0 { 
+		idx := rng.Intn(len(quadrants))
+		qid := quadrants[idx]
+		
+		cx, cy, ok := findVast(qid)
+		if g.Gen2IsPaused {
+			// ポーズがかかったらリターンし、UpdateWorld2からの再実行を待つ
+			gen.CurrentStep = Phase_IslandsQuad 
+			return 
+		}
+		
+		if ok {
+			// ポーズロジックが分離されたため、ここはスキップされ、ポーズ解除後に実行される
+
+			// 見つかった象限をリストから削除して、次の象限のチェックに進む
+			quadrants[idx] = quadrants[len(quadrants)-1]
+			quadrants = quadrants[:len(quadrants)-1]
+			
+		} else {
+			quadrants[idx] = quadrants[len(quadrants)-1]
+			quadrants = quadrants[:len(quadrants)-1]
+		}
+		g.World2.PinkRects = []Rect{} 
+	}
+	
+	// ループが完了したら次のフェーズへ
+	g.Gen2.CurrentStep = Phase_IslandsRand
+	gen.PhaseName = "7. Islands (Random)"
+}
+
 func (g *Game) NextStep() {
 	if g.Gen2.IsFinished { return }
+	
+	// ポーズがTrueの場合、NextStepの実行はUpdateWorld2()で制御される（ここでreturn）
+	if g.Gen2IsPaused { return } 
 	
 	gen := g.Gen2
 	w, h := gen.Config.W, gen.Config.H
@@ -243,18 +383,18 @@ func (g *Game) NextStep() {
 	rng := gen.Rng
 
 	gen.NewSoils = make(map[int]bool)
+	g.World2.PinkRects = []Rect{} // PinkRectsをリセット
 
 	switch gen.CurrentStep {
-	case 0: // -> Mask Gen
-		gen.CurrentStep++
+	case Phase_Init: // 0 -> 1
+		gen.CurrentStep = Phase_MaskGen
 		gen.PhaseName = "1. Generating Mask (Type 1)"
-
 		gen.MaskMain = GenerateMask(w, h, 1, rng)
 		gen.FinalMask = make([][]float64, w)
 		for x := 0; x < w; x++ {
 			gen.FinalMask[x] = make([]float64, h)
 			for y := 0; y < h; y++ {
-				gen.FinalMask[x][y] = gen.MaskMain[x][y]
+				gen.FinalMask[x][y] = gen.MaskMain[x][y] 
 			}
 		}
 		gen.UpdateMaskImage(w, h)
@@ -266,14 +406,14 @@ func (g *Game) NextStep() {
 		gen.TargetSoilCount = int(float64(w*h) * float64(targetPct) / 100.0)
 		g.LastTargetSoil = targetPct
 
-	case 1: // -> Soil Start
-		gen.CurrentStep++
-		gen.PhaseName = "2. Soil: Walkers Start"
 
+	case Phase_MaskGen: // 1 -> 2
+		gen.CurrentStep = Phase_SoilStart
+		gen.PhaseName = "2. Soil: Walkers Start"
 		gen.CurrentSoilCount = 0
-		cx, cy := w/2, h/2
 		
 		findSpawn := func() (int, int) {
+			cx, cy := w/2, h/2
 			return cx + rng.Intn(10)-5, cy + rng.Intn(10)-5
 		}
 
@@ -284,7 +424,8 @@ func (g *Game) NextStep() {
 			gen.Walkers[i].x, gen.Walkers[i].y = sx, sy
 		}
 
-	case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11: // -> Soil Progress
+
+	case Phase_SoilStart, 3, 4, 5, 6, 7, 8, 9, 10, Phase_SoilProgressEnd: // 2, 3, ..., 11
 		stepIndex := gen.CurrentStep - 1
 		milestone := float64(stepIndex) * 0.10
 		target := int(float64(gen.TargetSoilCount) * milestone)
@@ -305,13 +446,12 @@ func (g *Game) NextStep() {
 			return false
 		}
 		
-		cx, cy := w/2, h/2
 		findSpawn := func() (int, int) {
+			cx, cy := w/2, h/2
 			return cx + rng.Intn(20)-10, cy + rng.Intn(20)-10
 		}
 
 		safety := 0
-		// Ensure Walkers are initialized to avoid panic
 		if len(gen.Walkers) == 0 {
 			gen.Walkers = make([]struct{ x, y int }, 10)
 			for i := 0; i < 10; i++ {
@@ -356,7 +496,7 @@ func (g *Game) NextStep() {
 		gen.PhaseName = fmt.Sprintf("3. Soil Progress: %d%%", int(milestone*100))
 
 		// Tectonic Shift at ~30% (Step 4)
-		if gen.CurrentStep == 4 {
+		if gen.CurrentStep == 4 { // 4
 			shiftX := rng.Intn(w/3*2) - (w / 3)
 			shiftY := rng.Intn(h/3*2) - (h / 3)
 			tempGrid := make([][]World2Tile, w)
@@ -419,16 +559,16 @@ func (g *Game) NextStep() {
 			gen.PhaseName += " + Tectonic"
 		}
 		gen.CurrentStep++
-		if gen.CurrentStep == 12 {
-			gen.CurrentStep = 13
+		if gen.CurrentStep > Phase_SoilProgressEnd {
+			gen.CurrentStep = Phase_Bridge
 		}
 
-	case 13: // -> Bridge
-		gen.CurrentStep++
+	case Phase_Bridge: // 13 -> 14
+		gen.CurrentStep = Phase_Centering
 		// Type 1 doesn't use bridges
 
-	case 14: // -> Safe Centering
-		gen.CurrentStep++
+	case Phase_Centering: // 14 -> 15
+		gen.CurrentStep = Phase_IslandsQuad
 		if gen.Config.Centering {
 			gen.PhaseName = "5. Safe Centering"
 			minX, minY, maxX, maxY := w, h, 0, 0
@@ -488,90 +628,16 @@ func (g *Game) NextStep() {
 			gen.PhaseName = "5. Safe Centering (Skipped)"
 		}
 
-	case 15: // -> Islands (Quad)
-		gen.CurrentStep++
-		gen.PhaseName = "6. Islands (Quad)"
-		g.World2.PinkRects = []Rect{}
-		vastSize := gen.Config.VastOcean
-		boundSize := gen.Config.IslandBound
-		placeSoil := func(x, y int, src int) {
-			if x >= 3 && x < w-3 && y >= 3 && y < h-3 {
-				g.World2.Tiles[x][y].Type = W2TileSoil
-				g.World2.Tiles[x][y].Source = src
-				gen.NewSoils[y*w+x] = true
-			}
+	case Phase_IslandsQuad: // 15 -> 16
+		// *** 修正: processIslandsQuadStepを呼び出し、ポーズ/再実行ロジックを処理 ***
+		g.processIslandsQuadStep(w, h, rng, gen)
+		if g.Gen2IsPaused {
+			return 
 		}
-		quadrants := []int{0, 1, 2, 3}
-		created := 0
-		findVast := func(qid int) (int, int, bool) {
-			var sx, sy, ex, ey int
-			halfW, halfH := w/2, h/2
-			switch qid {
-			case 0: sx, sy, ex, ey = 3, 3, halfW, halfH
-			case 1: sx, sy, ex, ey = halfW, 3, w-3, halfH
-			case 2: sx, sy, ex, ey = 3, halfH, halfW, h-3
-			case 3: sx, sy, ex, ey = halfW, halfH, w-3, h-3
-			}
-			for try := 0; try < 30; try++ {
-				cx := sx + rng.Intn(ex-sx)
-				cy := sy + rng.Intn(ey-sy)
-				halfVast := vastSize / 2
-				isVast := true
-				for dy := -halfVast; dy <= halfVast; dy++ {
-					for dx := -halfVast; dx <= halfVast; dx++ {
-						tx, ty := cx+dx, cy+dy
-						if tx < 3 || tx >= w-3 || ty < 3 || ty >= h-3 {
-							isVast = false
-							break
-						}
-						if g.World2.Tiles[tx][ty].Type != W2TileVariableOcean {
-							isVast = false
-							break
-						}
-					}
-					if !isVast { break }
-				}
-				if isVast { return cx, cy, true }
-			}
-			return 0, 0, false
-		}
-		for created < 2 && len(quadrants) > 0 {
-			idx := rng.Intn(len(quadrants))
-			qid := quadrants[idx]
-			cx, cy, ok := findVast(qid)
-			if ok {
-				halfVast := vastSize / 2
-				g.World2.PinkRects = append(g.World2.PinkRects, Rect{x: cx - halfVast, y: cy - halfVast, w: vastSize, h: vastSize})
-				area := boundSize * boundSize
-				ratio := 0.3 + rng.Float64()*0.4
-				tgt := int(float64(area) * ratio)
-				cnt := 0
-				wx, wy := cx, cy
-				halfBound := boundSize / 2
-				for cnt < tgt {
-					placeSoil(wx, wy, SrcIsland)
-					cnt++
-					dir := rng.Intn(4)
-					switch dir {
-					case 0: wy--
-					case 1: wx++
-					case 2: wy++
-					case 3: wx--
-					}
-					if wx < cx-halfBound { wx = cx - halfBound }
-					if wx > cx+halfBound { wx = cx + halfBound }
-					if wy < cy-halfBound { wy = cy - halfBound }
-					if wy > cy+halfBound { wy = cy + halfBound }
-				}
-				created++
-			} else {
-				quadrants[idx] = quadrants[len(quadrants)-1]
-				quadrants = quadrants[:len(quadrants)-1]
-			}
-		}
+		// processIslandsQuadStep内で次のPhase_IslandsRandへ進む
 
-	case 16: // -> Islands (Rand)
-		gen.CurrentStep++
+	case Phase_IslandsRand: // 16 -> 17
+		gen.CurrentStep = Phase_Transit
 		gen.PhaseName = "7. Islands (Random)"
 		for k := 0; k < 5; k++ {
 			rx, ry := rng.Intn(w), rng.Intn(h)
@@ -582,8 +648,8 @@ func (g *Game) NextStep() {
 			}
 		}
 
-	case 17: // -> Transit
-		gen.CurrentStep++
+	case Phase_Transit: // 17 -> 18
+		gen.CurrentStep = Phase_CliffsShallows
 		gen.PhaseName = "8. Transit Islands"
 		type Point struct{x,y int}
 		islands := []Point{}
@@ -603,9 +669,8 @@ func (g *Game) NextStep() {
 			for x := 0; x < w; x++ {
 				for y := 0; y < h; y++ {
 					t := g.World2.Tiles[x][y]
-					if (t.Type == W2TileSoil || t.Type == W2TileTransit) && t.Source != SrcIsland {
+					if (t.Type == W2TileSoil || t.Type == W2TileTransit || t.Type == W2TileCliff) && t.Source != SrcIsland {
 						d := calcDist(tx, ty, x, y)
-						if d < 8.0 { continue }
 						if d < minDist {
 							minDist = d
 							nx, ny = x, y
@@ -615,19 +680,88 @@ func (g *Game) NextStep() {
 			}
 			return nx, ny
 		}
+		
+		// 経由島内部でのランダムウォーク生成 (3x3, 4-7タイル, 周囲3か所に浅瀬)
+		genTransitIsland := func(cx, cy int) {
+			halfBound := 1 // 3x3 の中心から1マス
+			count := 0
+			targetCount := 4 + rng.Intn(4) // 4〜7タイル
+			
+			// 3x3の島を作成
+			wx, wy := cx, cy
+			for count < targetCount {
+				if wx >= cx-halfBound && wx <= cx+halfBound && wy >= cy-halfBound && wy <= cy+halfBound {
+					tx, ty := wx, wy
+					if g.World2.Tiles[tx][ty].Type == W2TileVariableOcean {
+						g.World2.Tiles[tx][ty].Type = W2TileTransit
+						g.World2.Tiles[tx][ty].Source = SrcBridge
+						gen.NewSoils[ty*w+tx] = true
+						count++
+					}
+				}
+				
+				dir := rng.Intn(4)
+				switch dir {
+				case 0: wy--
+				case 1: wx++
+				case 2: wy++
+				case 3: wx--
+				}
+				// 3x3の範囲内に強制的に留める
+				if wx < cx-halfBound { wx = cx - halfBound }
+				if wx > cx+halfBound { wx = cx + halfBound }
+				if wy < cy-halfBound { wy = cy - halfBound }
+				if wy > cy+halfBound { wy = cy + halfBound }
+			}
+			
+			// 浅瀬を3か所生成
+			shallowCount := 0
+			for i := 0; i < 20 && shallowCount < 3; i++ {
+				dx, dy := rng.Intn(5)-2, rng.Intn(5)-2 // 5x5の範囲
+				tx, ty := cx+dx, cy+dy
+				
+				// 経由島の外側 (海) で、かつ固定海でないこと
+				if tx >= 3 && tx < w-3 && ty >= 3 && ty < h-3 && g.World2.Tiles[tx][ty].Type == W2TileVariableOcean {
+					// 周囲1マスにTransitタイルがあるかチェック
+					hasTransitNeighbor := false
+					for ndy := -1; ndy <= 1; ndy++ {
+						for ndx := -1; ndx <= 1; ndx++ {
+							// 境界チェックを追加
+							if tx+ndx >= 0 && tx+ndx < w && ty+ndy >= 0 && ty+ndy < h {
+								if g.World2.Tiles[tx+ndx][ty+ndy].Type == W2TileTransit {
+									hasTransitNeighbor = true
+									break
+								}
+							}
+						}
+						if hasTransitNeighbor { break }
+					}
+					
+					if hasTransitNeighbor {
+						g.World2.Tiles[tx][ty].Type = W2TileShallow
+						gen.NewSoils[ty*w+tx] = true
+						shallowCount++
+					}
+				}
+			}
+		}
+
 		for _, center := range islands {
 			sx, sy := findNearestSoil(center.x, center.y)
 			if sx == center.x && sy == center.y { continue }
 			currX, currY := float64(sx), float64(sy)
 			destX, destY := float64(center.x), float64(center.y)
 			totalDist := calcDist(int(currX), int(currY), int(destX), int(destY))
+			
 			if totalDist >= float64(gen.Config.TransitDist) {
 				for s := 0; s < 50; s++ {
 					vecX := destX - currX
 					vecY := destY - currY
 					vecLen := math.Sqrt(vecX*vecX + vecY*vecY)
 					if vecLen == 0 { break }
-					step := 5.0 + float64(rng.Intn(4))
+					
+					step := 5.0 + float64(rng.Intn(4)) 
+					
 					nextX := currX + (vecX/vecLen)*step
 					nextY := currY + (vecY/vecLen)*step
 					ix, iy := int(nextX), int(nextY)
@@ -650,18 +784,27 @@ func (g *Game) NextStep() {
 					}
 					if nearIslandSoil { break }
 
-					for dy := 0; dy < 2; dy++ {
-						for dx := 0; dx < 2; dx++ {
-							tx, ty := ix+dx, iy+dy
-							if tx >= 3 && tx < w-3 && ty >= 3 && ty < h-3 {
-								if g.World2.Tiles[tx][ty].Type == W2TileVariableOcean {
-									g.World2.Tiles[tx][ty].Type = W2TileTransit
-									g.World2.Tiles[tx][ty].Source = SrcIsland
-									gen.NewSoils[ty*w+tx] = true
-								}
+					// *** 航路のマークアップ ***
+					prevX, prevY := int(currX), int(currY)
+					markPath := func(x1, y1, x2, y2 int) {
+						dx := x2 - x1; dy := y2 - y1
+						dist := math.Sqrt(float64(dx*dx + dy*dy))
+						if dist == 0 { return }
+						steps := int(dist) * 2 // 詳細にマーク
+						for i := 0; i <= steps; i++ {
+							tx := int(float64(x1) + float64(dx)*float64(i)/float64(steps))
+							ty := int(float64(y1) + float64(dy)*float64(i)/float64(steps))
+							if tx >= 0 && tx < w && ty >= 0 && ty < h && g.World2.Tiles[tx][ty].Type == W2TileVariableOcean {
+								g.World2.Tiles[tx][ty].Source = SrcTransitPath
 							}
 						}
 					}
+					markPath(prevX, prevY, ix, iy)
+					// ************************
+
+					// *** 経由島の生成 ***
+					genTransitIsland(ix, iy)
+					
 					currX, currY = nextX, nextY
 					if calcDist(int(currX), int(currY), int(destX), int(destY)) < float64(gen.Config.TransitDist) {
 						break
@@ -670,17 +813,17 @@ func (g *Game) NextStep() {
 			}
 		}
 
-	case 18: // -> Cliffs & Shallows
-		gen.CurrentStep++
+	case Phase_CliffsShallows: // 18 -> 19
+		gen.CurrentStep = Phase_LakesFinal
 		gen.PhaseName = "9. Cliffs & Shallows"
 		type P struct { x, y int }
 		isCoastal := func(x, y int) bool {
-			if g.World2.Tiles[x][y].Type != W2TileSoil { return false }
+			if g.World2.Tiles[x][y].Type != W2TileSoil && g.World2.Tiles[x][y].Type != W2TileTransit { return false } 
 			dxs := []int{0, 1, 0, -1}
 			dys := []int{-1, 0, 1, 0}
 			for i := 0; i < 4; i++ {
 				nx, ny := x+dxs[i], y+dys[i]
-				if nx >= 0 && nx < w && ny >= 0 && ny < h && g.World2.Tiles[nx][ny].Type == W2TileVariableOcean {
+				if nx >= 0 && nx < w && ny >= 0 && ny < h && (g.World2.Tiles[nx][ny].Type == W2TileVariableOcean || g.World2.Tiles[nx][ny].Type == W2TileShallow) {
 					return true
 				}
 			}
@@ -833,8 +976,8 @@ func (g *Game) NextStep() {
 			}
 		}
 
-	case 19: // -> Lakes & Final
-		gen.CurrentStep++
+	case Phase_LakesFinal: // 19
+		gen.CurrentStep++ // 20
 		gen.PhaseName = "10. Lakes & Done"
 		reached := make([][]bool, w)
 		for x := range reached { reached[x] = make([]bool, h) }
@@ -890,7 +1033,7 @@ func (g *Game) NextStep() {
 		gen.IsFinished = true
 	}
 	
-	g.Gen2.CurrentSeed = gen.Rng.Int63() // Save next seed
+	gen.CurrentSeed = gen.Rng.Int63() // Save next seed
 	g.SaveSnapshot()
 }
 
@@ -904,6 +1047,15 @@ func (g *Game) UpdateWorld2() error {
 		g.InitWorld2Generator() // Reset
 	}
 
+	// ポーズ中の処理: PgDn (Next) / Enter のみ有効
+	if g.Gen2IsPaused {
+		if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) || inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+			g.Gen2IsPaused = false // ポーズを解除し、次のステップに進む
+			g.NextStep()           // NextStepを再度実行
+		}
+		return nil // 他の操作（移動、ズーム、入力）を無効化
+	}
+	
 	if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) {
 		g.NextStep()
 	}
@@ -950,29 +1102,23 @@ func (g *Game) UpdateWorld2() error {
 				g.InputMode = EditTransitDist
 				g.InputBuffer = fmt.Sprintf("%d", g.TransitDist)
 			} else if my >= 300 && my <= 330 {
-				g.InputMode = EditMapTypeMain
-				g.InputBuffer = fmt.Sprintf("%d", g.MapTypeMain)
-			} else if my >= 340 && my <= 370 {
-				g.InputMode = EditMapTypeSub
-				g.InputBuffer = fmt.Sprintf("%d", g.MapTypeSub)
-			} else if my >= 380 && my <= 410 {
 				g.InputMode = EditMapRatio
 				g.InputBuffer = fmt.Sprintf("%d", g.MapRatio)
-			} else if my >= 420 && my <= 450 {
+			} else if my >= 340 && my <= 370 {
 				g.EnableCentering = !g.EnableCentering
-			} else if my >= 460 && my <= 490 {
+			} else if my >= 380 && my <= 410 {
 				g.InputMode = EditCliffInit
 				g.InputBuffer = fmt.Sprintf("%.1f", g.CliffInitVal)
-			} else if my >= 500 && my <= 530 {
+			} else if my >= 420 && my <= 450 {
 				g.InputMode = EditCliffDec
 				g.InputBuffer = fmt.Sprintf("%.2f", g.CliffDecVal)
-			} else if my >= 540 && my <= 570 {
+			} else if my >= 460 && my <= 490 {
 				g.InputMode = EditShallowDec
 				g.InputBuffer = fmt.Sprintf("%.2f", g.ShallowDecVal)
-			} else if my >= 580 && my <= 610 {
+			} else if my >= 500 && my <= 530 {
 				g.InputMode = EditCliffPath
 				g.InputBuffer = fmt.Sprintf("%d", g.CliffPathLen)
-			} else if my >= 620 && my <= 650 {
+			} else if my >= 540 && my <= 570 {
 				g.InputMode = EditForceSwitch
 				g.InputBuffer = fmt.Sprintf("%d", g.ForceSwitch)
 			}
@@ -1010,14 +1156,6 @@ func (g *Game) UpdateWorld2() error {
 					g.W2Height = valInt
 				case EditTransitDist:
 					g.TransitDist = valInt
-				case EditMapTypeMain:
-					if valInt >= 1 && valInt <= 9 {
-						g.MapTypeMain = valInt
-					}
-				case EditMapTypeSub:
-					if valInt >= 1 && valInt <= 9 {
-						g.MapTypeSub = valInt
-					}
 				case EditMapRatio:
 					if valInt >= 0 && valInt <= 10 {
 						g.MapRatio = valInt
@@ -1118,6 +1256,7 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 			size := float64(World2TileSize) * g.World2.Zoom
 
 			var c color.Color
+			// --- タイルカラー判定 ---
 			switch tile.Type {
 			case W2TileSoil:
 				if g.Gen2.NewSoils[y*w+x] {
@@ -1133,7 +1272,7 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 					case SrcBridge:
 						c = color.RGBA{150, 150, 160, 255}
 					case SrcIsland:
-						c = color.RGBA{180, 160, 100, 255}
+						c = color.RGBA{230, 190, 100, 255}
 					default:
 						c = color.RGBA{139, 69, 19, 255}
 					}
@@ -1143,6 +1282,10 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 					c = color.RGBA{60, 100, 200, 255}
 				} else {
 					c = color.RGBA{30, 60, 180, 255}
+				}
+				// 航路の色付け (SrcTransitPath)
+				if tile.Source == SrcTransitPath {
+					c = color.RGBA{40, 80, 160, 255} // 浅瀬より暗い色
 				}
 			case W2TileFixedOcean:
 				c = color.RGBA{10, 20, 80, 255}
@@ -1160,6 +1303,7 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 				}
 			}
 			ebitenutil.DrawRect(screen, sx, sy, size+1, size+1, c)
+			// --- タイルカラー判定 終 ---
 
 			if g.World2.ShowGrid || tile.Type == W2TileTransit {
 				if g.World2.ShowGrid {
@@ -1171,7 +1315,8 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 				}
 			}
 			
-			if g.Gen2.CurrentStep <= 2 && g.Gen2.FinalMask != nil {
+			// Gen Mask Imageの描画
+			if g.Gen2.CurrentStep <= Phase_SoilStart && g.Gen2.FinalMask != nil {
 				val := g.Gen2.FinalMask[x][y]
 				if val > 0 {
 					gray := uint8(val * 255)
@@ -1180,6 +1325,27 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 			}
 		}
 	}
+	
+	// --- ポーズ中の強調描画 (浅瀬と同じ色) ---
+	if g.Gen2IsPaused {
+		for _, rect := range g.World2.PinkRects {
+			sx := (float64(rect.x)*float64(World2TileSize) - g.World2.OffsetX) * g.World2.Zoom + ScreenWidth/2
+			sy := (float64(rect.y)*float64(World2TileSize) - g.World2.OffsetY) * g.World2.Zoom + ScreenHeight/2
+			w := float64(rect.w) * g.World2.Zoom
+			h := float64(rect.h) * g.World2.Zoom
+			
+			// 浅瀬の色で半透明の矩形を描画
+			ebitenutil.DrawRect(screen, sx, sy, w, h, color.RGBA{60, 160, 200, 100}) 
+		}
+		
+		// ポーズメッセージ
+		msg := "Paused: Large Ocean Found (Press [PgDn] or [Enter] to continue)"
+		w := len(msg) * 7
+		ebitenutil.DrawRect(screen, float64(ScreenWidth/2-w/2-10), float64(ScreenHeight/2-20), float64(w+20), 40, color.RGBA{50, 50, 0, 230})
+		text.Draw(screen, msg, basicfont.Face7x13, ScreenWidth/2-w/2, ScreenHeight/2+5, color.White)
+	}
+	// --- ポーズ中の強調描画 終 ---
+
 
 	vectorY := 20
 	text.Draw(screen, "Phase: "+g.Gen2.PhaseName, basicfont.Face7x13, 220, 20, color.White)
@@ -1218,16 +1384,14 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 		}
 		text.Draw(screen, txt, basicfont.Face7x13, 20, y+20, color.White)
 	}
-
+	
 	drawInputBox(100, "Min Soil %", g.SoilMin, EditSoilMin)
 	drawInputBox(140, "Max Soil %", g.SoilMax, EditSoilMax)
 	drawInputBox(180, "Width", g.W2Width, EditW2Width)
 	drawInputBox(220, "Height", g.W2Height, EditW2Height)
 	drawInputBox(260, "Transit Dist", g.TransitDist, EditTransitDist)
 
-	drawInputBox(300, "Main Type", g.MapTypeMain, EditMapTypeMain)
-	drawInputBox(340, "Sub Type", g.MapTypeSub, EditMapTypeSub)
-	drawInputBox(380, "Ratio", g.MapRatio, EditMapRatio)
+	drawInputBox(300, "Ratio", g.MapRatio, EditMapRatio)
 
 	cenColor := color.RGBA{50, 0, 0, 200}
 	cenText := "OFF"
@@ -1235,14 +1399,14 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 		cenColor = color.RGBA{0, 100, 0, 200}
 		cenText = "ON"
 	}
-	ebitenutil.DrawRect(screen, 10, 420, 200, 30, cenColor)
-	text.Draw(screen, "Centering: "+cenText, basicfont.Face7x13, 20, 440, color.White)
+	ebitenutil.DrawRect(screen, 10, 340, 200, 30, cenColor)
+	text.Draw(screen, "Centering: "+cenText, basicfont.Face7x13, 20, 360, color.White)
 
-	drawInputBox(460, "Cliff Init", g.CliffInitVal, EditCliffInit)
-	drawInputBox(500, "Cliff Dec", g.CliffDecVal, EditCliffDec)
-	drawInputBox(540, "Shallow Dec", g.ShallowDecVal, EditShallowDec)
-	drawInputBox(580, "Cliff Path", g.CliffPathLen, EditCliffPath)
-	drawInputBox(620, "Force Turn", g.ForceSwitch, EditForceSwitch)
+	drawInputBox(380, "Cliff Init", g.CliffInitVal, EditCliffInit)
+	drawInputBox(420, "Cliff Dec", g.CliffDecVal, EditCliffDec)
+	drawInputBox(460, "Shallow Dec", g.ShallowDecVal, EditShallowDec)
+	drawInputBox(500, "Cliff Path", g.CliffPathLen, EditCliffPath)
+	drawInputBox(540, "Force Turn", g.ForceSwitch, EditForceSwitch)
 
 	text.Draw(screen, "[PgDn] Next, [PgUp] Back, [Enter] All", basicfont.Face7x13, 10, 670, color.White)
 	text.Draw(screen, "[Drag]: Move, [Ctrl+Wheel]: Zoom, [R]: Reset", basicfont.Face7x13, 10, ScreenHeight-20, color.White)

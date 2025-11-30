@@ -45,12 +45,13 @@ const (
 )
 
 const (
-	SrcNone    = 0
-	SrcMain    = 1 
-	SrcSub     = 2 
-	SrcMix     = 3 
-	SrcBridge  = 4 
-	SrcIsland  = 5 
+	SrcNone          = 0
+	SrcMain          = 1 
+	SrcSub           = 2 
+	SrcMix           = 3 
+	SrcBridge        = 4 
+	SrcIsland        = 5 
+	SrcTransitPath   = 6 
 )
 
 // Input Edit Modes
@@ -65,11 +66,24 @@ const (
 	EditCliffInit   = 7
 	EditCliffDec    = 8
 	EditShallowDec  = 9
-	EditCliffPath   = 10 // New
-	EditForceSwitch = 11 // New
-	EditMapTypeMain = 12
-	EditMapTypeSub = 13
+	EditCliffPath   = 10 
+	EditForceSwitch = 11 
 	EditMapRatio = 14
+)
+
+// World2 Generation Phases (Step ID)
+const (
+	Phase_Init             = 0
+	Phase_MaskGen          = 1
+	Phase_SoilStart        = 2
+	Phase_SoilProgressEnd  = 11
+	Phase_Bridge           = 13
+	Phase_Centering        = 14
+	Phase_IslandsQuad      = 15
+	Phase_IslandsRand      = 16
+	Phase_Transit          = 17
+	Phase_CliffsShallows   = 18
+	Phase_LakesFinal       = 19
 )
 
 var ZoomLevels = []float64{0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5}
@@ -159,12 +173,12 @@ type World2Tile struct {
 type WorldMap2 struct {
 	Width, Height    int
 	Tiles            [][]World2Tile
-	OffsetX, OffsetY float64 // 修正: 次のフィールドと正しく分離
+	OffsetX, OffsetY float64
 	Zoom             float64
 	ShowGrid         bool
 	StatsInfo        []string
 	PinkRects        []Rect
-} // <- 修正により、この位置でEOFエラーが解消します。
+}
 
 type GenSnapshot struct {
 	Tiles     [][]World2Tile
@@ -205,7 +219,7 @@ type World2Generator struct {
 	
 	NewSoils map[int]bool
 	
-	Multiplier float64 // 修正: 次のフィールドと正しく分離
+	Multiplier float64
 	Excluded   map[int]bool
 	
 	CliffStreak   int
@@ -213,11 +227,12 @@ type World2Generator struct {
 }
 
 type GenConfig struct {
-	MinPct, MaxPct, W, H, TransitDist, MainType, SubType, Ratio int
+	MinPct, MaxPct, W, H, TransitDist, Ratio int
 	VastOcean, IslandBound int
 	Centering bool
 	CliffInit, CliffDec, ShallowDec float64
 	CliffPathLen, ForceSwitch int
+	MainType, SubType int 
 }
 
 type Camera struct {
@@ -253,6 +268,10 @@ type Game struct {
 	IsDragging bool
 	ArrowTimer float64
 	
+	Gen2IsPaused bool
+	Gen2PausedQuadID int // New
+	Gen2PausedIslandCenter struct{x, y int} // New
+	
 	SoilMin     int
 	SoilMax     int
 	W2Width     int
@@ -261,8 +280,6 @@ type Game struct {
 	VastOceanSize   int
 	IslandBoundSize int
 	
-	MapTypeMain int 
-	MapTypeSub  int 
 	MapRatio    int 
 	EnableCentering bool
 	
