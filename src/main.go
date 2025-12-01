@@ -3,38 +3,25 @@ package main
 
 import (
 	"log"
-	"math/rand"
-	"time"
+	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-func NewGame() *Game {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	g := &Game{ 
-		State: StateMenu, 
-		MenuIndex: 0, 
-		Rng: rng,
-		// World 2 Init
-		SoilMin: 20,
-		SoilMax: 28,
-		W2Width: DefaultWorld2Width,
-		W2Height: DefaultWorld2Height,
-		TransitDist: 15,
-		VastOceanSize: 25,
-		IslandBoundSize: 15,
-		
-		// MapTypeMain, MapTypeSub は固定値 1 のため削除
-		MapRatio:    10,
-		EnableCentering: true,
+// 初期設定ファイル名
+const SettingsFilename = "settings.txt"
 
-		// Cliff Params Default
-		CliffInitVal:  10.0,
-		CliffDecVal:   0.1,
-		ShallowDecVal: 0.25,
-		CliffPathLen:  5, // New
-		ForceSwitch:   5, // New
+// NewGame は app_init.go で定義されたヘルパー関数
+func NewGame() *Game {
+	g := initializeNewGame()
+	
+	// 設定ファイルを読み込み、初期値を上書き
+	if settings, err := LoadSettings(SettingsFilename); err == nil {
+		g.ApplySettings(settings)
+	} else if !os.IsNotExist(err) {
+		log.Printf("Error loading settings: %v", err)
 	}
+	
 	g.InitDungeon()
 	return g
 }
