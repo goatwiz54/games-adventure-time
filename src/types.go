@@ -46,12 +46,14 @@ const (
 
 const (
 	SrcNone          = 0
-	SrcMain          = 1 
-	SrcSub           = 2 
-	SrcMix           = 3 
-	SrcBridge        = 4 
-	SrcIsland        = 5 
-	SrcTransitPath   = 6 
+	SrcMain          = 1
+	SrcSub           = 2
+	SrcMix           = 3
+	SrcBridge        = 4
+	SrcIsland        = 5
+	SrcTransitPath   = 6
+	SrcBRouteIsland  = 7  // B航路の経由島（緑）
+	SrcBRoutePath    = 8  // B航路の航路（暗緑）
 )
 
 // Input Edit Modes
@@ -81,9 +83,16 @@ const (
 	Phase_Centering        = 14
 	Phase_IslandsQuad      = 15
 	Phase_IslandsRand      = 16
-	Phase_Transit          = 17
-	Phase_CliffsShallows   = 18
-	Phase_LakesFinal       = 19
+	
+	// Transit Phase の拡張
+	Phase_Transit_Start    = 17
+	Phase_IslandShallowAdjust = 18
+	Phase_Transit_Route1   = 19
+	Phase_Transit_Route2_Calc = 20
+	Phase_Transit_Route2_Draw = 21
+
+	Phase_CliffsShallows   = 22
+	Phase_LakesFinal       = 23 
 )
 
 var ZoomLevels = []float64{0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5}
@@ -268,9 +277,7 @@ type Game struct {
 	IsDragging bool
 	ArrowTimer float64
 	
-	Gen2IsPaused bool
-	Gen2PausedQuadID int // New
-	Gen2PausedIslandCenter struct{x, y int} // New
+	TotalRoute1Dist float64
 	
 	SoilMin     int
 	SoilMax     int
@@ -295,4 +302,7 @@ type Game struct {
 
 	WarningMsg   string
 	WarningTimer float64
+
+	AutoProgress bool // Enterキー押下時に自動で次のフェーズへ進むフラグ
+	SuppressMapDraw bool // 自動進行中はマップ描画を抑制し、Phase名のみ表示
 }
