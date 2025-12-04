@@ -9,7 +9,6 @@ import (
 func (g *Game) PhaseCliffsShallows(w, h int, rng *rand.Rand, gen *World2Generator) {
     _ = math.Abs(0) // math の利用を明示
 
-	gen.CurrentStep = Phase_LakesFinal
 	gen.PhaseName = "9. Cliffs & Shallows"
 	type P struct { x, y int }
 	isCoastal := func(x, y int) bool {

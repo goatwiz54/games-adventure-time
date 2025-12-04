@@ -36,12 +36,14 @@ const (
 )
 
 const (
-	W2TileVariableOcean = 0 
-	W2TileSoil          = 1 
-	W2TileFixedOcean    = 2 
-	W2TileTransit       = 3 
+	W2TileVariableOcean = 0
+	W2TileSoil          = 1
+	W2TileFixedOcean    = 2
+	W2TileTransit       = 3
 	W2TileCliff         = 4
 	W2TileShallow       = 5
+	W2TileDeepSea       = 8  // 深海
+	W2TileVeryDeepSea   = 9  // 大深海（深海の重複）
 )
 
 const (
@@ -87,12 +89,13 @@ const (
 	// Transit Phase の拡張
 	Phase_Transit_Start    = 17
 	Phase_IslandShallowAdjust = 18
-	Phase_Transit_Route1   = 19
-	Phase_Transit_Route2_Calc = 20
-	Phase_Transit_Route2_Draw = 21
-
-	Phase_CliffsShallows   = 22
-	Phase_LakesFinal       = 23 
+	Phase_Transit_Route1   = 19  // 旧処理（スキップ）
+	Phase_Transit_Route2_Calc = 20  // 旧処理（スキップ）
+	Phase_Transit_Route2_Draw = 21  // 旧処理（スキップ）
+	Phase_Transit_RouteA   = 22  // 新しい航路探索A（赤色の矩形描画）
+	Phase_DeepSea          = 23  // 深海処理（十字架の楕円）
+	Phase_CliffsShallows   = 24
+	Phase_LakesFinal       = 25 
 )
 
 var ZoomLevels = []float64{0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5}
@@ -230,9 +233,20 @@ type World2Generator struct {
 	
 	Multiplier float64
 	Excluded   map[int]bool
-	
+
 	CliffStreak   int
 	ShallowStreak int
+
+	// 大島データ（Phase_IslandsQuad で生成、Phase_IslandsRandの小島は含まない）
+	Islands []IslandData
+}
+
+// IslandData は各大島の情報を保持（Phase_IslandsQuadで生成された島のみ）
+// 航路探索Aで使用される
+type IslandData struct {
+	Tiles []struct{ x, y int } // 大島を構成するタイルの座標リスト
+	MinX, MinY, MaxX, MaxY int // 大島がすっぽり入る矩形
+	CenterX, CenterY int        // 大島矩形の中心点
 }
 
 type GenConfig struct {

@@ -6,7 +6,8 @@ import (
 	"math/rand"
 )
 
-// Phase_IslandsQuad のロジックをポーズ/再実行対応のために分離 (ポーズ処理は完全に削除)
+// Phase_IslandsQuad: 大島の生成
+// マップを4象限に分割し、各象限で広い海エリアを探索して中〜大サイズの島を配置
 func (g *Game) processIslandsQuadStep(w, h int, rng *rand.Rand, gen *World2Generator) {
 	vastSize := gen.Config.VastOcean
 	boundSize := gen.Config.IslandBound
@@ -69,7 +70,7 @@ func (g *Game) processIslandsQuadStep(w, h int, rng *rand.Rand, gen *World2Gener
 		return 0, 0, false
 	}
 	
-	// 3. 島の探索と生成ループ
+	// 3. 大島の探索と生成ループ（最大4つ）
 	for created < 4 && len(quadrants) > 0 { 
 		idx := rng.Intn(len(quadrants))
 		qid := quadrants[idx]
@@ -77,15 +78,30 @@ func (g *Game) processIslandsQuadStep(w, h int, rng *rand.Rand, gen *World2Gener
 		cx, cy, ok := findVast(qid)
 		
 		if ok {
-			// 島を生成するロジック
+			// 大島を生成するロジック
 			area := boundSize * boundSize
 			ratio := 0.3 + rng.Float64()*0.4
 			tgt := int(math.Round(float64(area) * ratio))
 			cnt := 0
 			wx, wy := cx, cy
 			halfBound := boundSize / 2
+
+			// 大島データを記録
+			islandData := IslandData{
+				Tiles: []struct{ x, y int }{},
+				MinX: w, MinY: h, MaxX: 0, MaxY: 0,
+			}
+
 			for cnt < tgt {
 				placeSoil(wx, wy, SrcIsland)
+				// 大島タイルを記録
+				islandData.Tiles = append(islandData.Tiles, struct{ x, y int }{wx, wy})
+				// 矩形を更新
+				if wx < islandData.MinX { islandData.MinX = wx }
+				if wx > islandData.MaxX { islandData.MaxX = wx }
+				if wy < islandData.MinY { islandData.MinY = wy }
+				if wy > islandData.MaxY { islandData.MaxY = wy }
+
 				cnt++
 				dir := rng.Intn(4)
 				switch dir {
@@ -99,12 +115,19 @@ func (g *Game) processIslandsQuadStep(w, h int, rng *rand.Rand, gen *World2Gener
 				if wy < cy-halfBound { wy = cy - halfBound }
 				if wy > cy+halfBound { wy = cy + halfBound }
 			}
-			
+
+			// 大島の中心点を計算
+			islandData.CenterX = (islandData.MinX + islandData.MaxX) / 2
+			islandData.CenterY = (islandData.MinY + islandData.MaxY) / 2
+
+			// 大島データをジェネレータに追加（航路探索Aで使用）
+			gen.Islands = append(gen.Islands, islandData)
+
 			// 見つかった象限をリストから削除して、次の象限のチェックに進む
 			quadrants[idx] = quadrants[len(quadrants)-1]
 			quadrants = quadrants[:len(quadrants)-1]
 			created++
-			
+
 		} else {
 			quadrants[idx] = quadrants[len(quadrants)-1]
 			quadrants = quadrants[:len(quadrants)-1]
@@ -113,7 +136,7 @@ func (g *Game) processIslandsQuadStep(w, h int, rng *rand.Rand, gen *World2Gener
 	}
 
 	// ループが完了したら次のフェーズへ
-	gen.PhaseName = "6. Islands (Quad)"
+	gen.PhaseName = "6. Islands (Quad) - Large Islands"
 }
 
 func (g *Game) PhaseIslandsQuad(w, h int, rng *rand.Rand, gen *World2Generator) {

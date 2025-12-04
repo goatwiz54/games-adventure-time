@@ -8,12 +8,15 @@ import (
 
 func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator) {
 	gen.PhaseName = "8. Transit Islands (Route 1)"
-	
+
 	// *** 修正: markPath ローカル関数をここに定義 ***
 	markPath := func(x1, y1, x2, y2 int, w, h int) {
-		dx := x2 - x1; dy := y2 - y1
+		dx := x2 - x1
+		dy := y2 - y1
 		dist := math.Sqrt(float64(dx*dx + dy*dy))
-		if dist == 0 { return }
+		if dist == 0 {
+			return
+		}
 		steps := int(dist) * 2 // 詳細にマーク
 		for i := 0; i <= steps; i++ {
 			tx := int(float64(x1) + float64(dx)*float64(i)/float64(steps))
@@ -24,8 +27,8 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 		}
 	}
 	// **********************************************
-	
-	type Point struct{x,y int}
+
+	type Point struct{ x, y int }
 	islands := []Point{}
 	for x := 0; x < w; x += 5 {
 		for y := 0; y < h; y += 5 {
@@ -40,21 +43,8 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 	findNearestSoil := func(tx, ty int) (int, int) {
 		minDist := 999999.0
 		nx, ny := tx, ty
-
-		// 探索範囲を制限（中心から一定範囲のみ）
-		searchRadius := 100
-		startX := tx - searchRadius
-		if startX < 0 { startX = 0 }
-		endX := tx + searchRadius
-		if endX >= w { endX = w - 1 }
-		startY := ty - searchRadius
-		if startY < 0 { startY = 0 }
-		endY := ty + searchRadius
-		if endY >= h { endY = h - 1 }
-
-		// 5マス刻みでスキャン（高速化）
-		for x := startX; x <= endX; x += 5 {
-			for y := startY; y <= endY; y += 5 {
+		for x := 0; x < w; x++ {
+			for y := 0; y < h; y++ {
 				t := g.World2.Tiles[x][y]
 				if (t.Type == W2TileSoil || t.Type == W2TileTransit || t.Type == W2TileCliff) && t.Source != SrcIsland {
 					d := calcDist(tx, ty, x, y)
@@ -67,7 +57,7 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 		}
 		return nx, ny
 	}
-	
+
 	// 海の広さを判定（周囲の大陸密度をチェック）
 	checkSeaWidth := func(x, y int) string {
 		radius := 20
@@ -89,17 +79,22 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 
 		landRatio := float64(landCount) / float64(totalChecked)
 		if landRatio < 0.2 {
-			return "wide"  // 広い海
+			return "wide" // 広い海
 		}
-		return "narrow"    // 狭い海
+		return "narrow" // 狭い海
 	}
+
+	// 将来使用予定の関数 - 未使用警告を抑制
+	_ = checkSeaWidth
 
 	// 色付き航路描画
 	markPathWithColor := func(x1, y1, x2, y2 int, w, h int, sourceType int) {
 		dx := x2 - x1
 		dy := y2 - y1
 		dist := math.Sqrt(float64(dx*dx + dy*dy))
-		if dist == 0 { return }
+		if dist == 0 {
+			return
+		}
 		steps := int(dist) * 2
 
 		for i := 0; i <= steps; i++ {
@@ -156,6 +151,7 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 			}
 		}
 	}
+	_ = markCurvedPathA
 
 	// B航路: 弧の航路（±10マス）
 	markArcPathB := func(x1, y1, x2, y2 int, w, h int) {
@@ -172,7 +168,9 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 		perpDy := float64(dx) / dist
 		arcHeight := 5.0 + rng.Float64()*10.0 // 5~15マス
 		direction := 1.0
-		if rng.Float64() < 0.5 { direction = -1.0 }
+		if rng.Float64() < 0.5 {
+			direction = -1.0
+		}
 
 		ctrlX := float64(midX) + perpDx*arcHeight*direction
 		ctrlY := float64(midY) + perpDy*arcHeight*direction
@@ -208,6 +206,7 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 			}
 		}
 	}
+	_ = markArcPathB
 
 	// B航路: ジグザグ航路（±10マス、小さい経由島付き）
 	markZigzagPathB := func(x1, y1, x2, y2 int, w, h int) {
@@ -215,7 +214,9 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 		dy := y2 - y1
 		dist := math.Sqrt(float64(dx*dx + dy*dy))
 		segments := int(dist / 12) // 12マスごとにジグザグ
-		if segments < 2 { segments = 2 }
+		if segments < 2 {
+			segments = 2
+		}
 
 		currX, currY := float64(x1), float64(y1)
 		for i := 1; i <= segments; i++ {
@@ -266,6 +267,7 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 		// 最後のセグメントを終点まで描画
 		markPathWithColor(int(currX), int(currY), x2, y2, w, h, SrcBRoutePath)
 	}
+	_ = markZigzagPathB
 
 	// 経由島内部でのランダムウォーク生成 (3x3, 4-7タイル, 周囲3か所に浅瀬)
 	genTransitIsland := func(cx, cy int) {
@@ -290,24 +292,36 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 
 			dir := rng.Intn(4)
 			switch dir {
-			case 0: wy--
-			case 1: wx++
-			case 2: wy++
-			case 3: wx--
+			case 0:
+				wy--
+			case 1:
+				wx++
+			case 2:
+				wy++
+			case 3:
+				wx--
 			}
 			// 3x3の範囲内に強制的に留める
-			if wx < cx-halfBound { wx = cx - halfBound }
-			if wx > cx+halfBound { wx = cx + halfBound }
-			if wy < cy-halfBound { wy = cy - halfBound }
-			if wy > cy+halfBound { wy = cy + halfBound }
+			if wx < cx-halfBound {
+				wx = cx - halfBound
+			}
+			if wx > cx+halfBound {
+				wx = cx + halfBound
+			}
+			if wy < cy-halfBound {
+				wy = cy - halfBound
+			}
+			if wy > cy+halfBound {
+				wy = cy + halfBound
+			}
 		}
-		
+
 		// 浅瀬を3か所生成
 		shallowCount := 0
 		for i := 0; i < 20 && shallowCount < 3; i++ {
 			dx, dy := rng.Intn(5)-2, rng.Intn(5)-2 // 5x5の範囲
 			tx, ty := cx+dx, cy+dy
-			
+
 			// 経由島の外側 (海) で、かつ固定海でないこと
 			if tx >= 3 && tx < w-3 && ty >= 3 && ty < h-3 && g.World2.Tiles[tx][ty].Type == W2TileVariableOcean {
 				// 周囲1マスにTransitタイルがあるかチェック
@@ -322,9 +336,11 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 							}
 						}
 					}
-					if hasTransitNeighbor { break }
+					if hasTransitNeighbor {
+						break
+					}
 				}
-				
+
 				if hasTransitNeighbor {
 					g.World2.Tiles[tx][ty].Type = W2TileShallow
 					gen.NewSoils[ty*w+tx] = true
@@ -337,7 +353,9 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 	// 経由島生成
 	for _, center := range islands {
 		sx, sy := findNearestSoil(center.x, center.y)
-		if sx == center.x && sy == center.y { continue }
+		if sx == center.x && sy == center.y {
+			continue
+		}
 		currX, currY := float64(sx), float64(sy)
 		destX, destY := float64(center.x), float64(center.y)
 		totalDist := calcDist(int(currX), int(currY), int(destX), int(destY))
@@ -347,7 +365,9 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 				vecX := destX - currX
 				vecY := destY - currY
 				vecLen := math.Sqrt(vecX*vecX + vecY*vecY)
-				if vecLen == 0 { break }
+				if vecLen == 0 {
+					break
+				}
 
 				step := 5.0 + float64(rng.Intn(4))
 
@@ -357,99 +377,43 @@ func (g *Game) PhaseTransitStart(w, h int, rng *rand.Rand, gen *World2Generator)
 
 				distToGoal := calcDist(ix, iy, int(destX), int(destY))
 				if distToGoal < 5.0 {
-					// B航路: 最後の経由地から孤立島まで
-					seaWidth := checkSeaWidth(int(destX), int(destY))
-					r := rng.Float64()
-
-					if seaWidth == "wide" {
-						// 広い海: 弧70% / ジグザグ30%
-						if r < 0.7 {
-							markArcPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						} else {
-							markZigzagPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						}
-					} else {
-						// 狭い海: ジグザグ40% / 直線60%
-						if r < 0.4 {
-							markZigzagPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						} else {
-							markPathWithColor(int(currX), int(currY), int(destX), int(destY), w, h, SrcBRoutePath)
-						}
-					}
+					// 最後の経由地から孤立島まで航路をマークして終了
+					markPath(int(currX), int(currY), int(destX), int(destY), w, h)
 					break
 				}
 
-				// 大陸が近くにあるかチェック（経由島を配置しない）
-				tooCloseToLand := false
-				checkRadius := 6 // 6マス以内に大陸があれば停止
-				for dy := -checkRadius; dy <= checkRadius; dy++ {
-					for dx := -checkRadius; dx <= checkRadius; dx++ {
+				nearIslandSoil := false
+				for dy := -2; dy <= 2; dy++ {
+					for dx := -2; dx <= 2; dx++ {
 						tx, ty := ix+dx, iy+dy
 						if tx >= 0 && tx < w && ty >= 0 && ty < h {
-							t := g.World2.Tiles[tx][ty]
-							// 孤立島以外の土地（大陸）が近くにある
-							if (t.Type == W2TileSoil || t.Type == W2TileCliff) && t.Source != SrcIsland {
-								tooCloseToLand = true
-								break
+							if g.World2.Tiles[tx][ty].Type == W2TileSoil {
+								if calcDist(tx, ty, sx, sy) > 10 {
+									nearIslandSoil = true
+								}
 							}
 						}
 					}
-					if tooCloseToLand { break }
 				}
-				if tooCloseToLand {
-					// 大陸に近づいたので、B航路で孤立島に直接つなぐ
-					seaWidth := checkSeaWidth(int(destX), int(destY))
-					r := rng.Float64()
-					if seaWidth == "wide" {
-						if r < 0.7 {
-							markArcPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						} else {
-							markZigzagPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						}
-					} else {
-						if r < 0.4 {
-							markZigzagPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						} else {
-							markPathWithColor(int(currX), int(currY), int(destX), int(destY), w, h, SrcBRoutePath)
-						}
-					}
+				if nearIslandSoil {
 					break
 				}
 
-				// A航路: 経由島間の航路（曲線50% / 直線50%）
-				if rng.Float64() < 0.5 {
-					markCurvedPathA(int(currX), int(currY), ix, iy, w, h)
-				} else {
-					markPath(int(currX), int(currY), ix, iy, w, h)
-				}
+				// *** 航路のマークアップ（経由島間の航路）***
+				markPath(int(currX), int(currY), ix, iy, w, h)
+				// ************************
 
-				// 経由島の生成
+				// *** 経由島の生成 ***
 				genTransitIsland(ix, iy)
 
 				currX, currY = nextX, nextY
 				if calcDist(int(currX), int(currY), int(destX), int(destY)) < float64(gen.Config.TransitDist) {
-					// B航路: 最後の経由地から孤立島まで
-					seaWidth := checkSeaWidth(int(destX), int(destY))
-					r := rng.Float64()
-
-					if seaWidth == "wide" {
-						// 広い海: 弧70% / ジグザグ30%
-						if r < 0.7 {
-							markArcPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						} else {
-							markZigzagPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						}
-					} else {
-						// 狭い海: ジグザグ40% / 直線60%
-						if r < 0.4 {
-							markZigzagPathB(int(currX), int(currY), int(destX), int(destY), w, h)
-						} else {
-							markPathWithColor(int(currX), int(currY), int(destX), int(destY), w, h, SrcBRoutePath)
-						}
-					}
+					// 最後の経由地から孤立島まで航路をマークして終了
+					markPath(int(currX), int(currY), int(destX), int(destY), w, h)
 					break
 				}
 			}
 		}
 	}
+
 }

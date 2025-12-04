@@ -2,18 +2,18 @@
 package main
 
 import (
-	"math/rand"
 	"math"
+	"math/rand"
 )
 
 // 円状の島の内側に浅瀬を生成する
 func (g *Game) PhaseIslandShallowAdjust(w, h int, rng *rand.Rand, gen *World2Generator) {
 	gen.PhaseName = "8.5. Island Shallow Adjust (Skipped)"
 	// スキップ
-	return
+	//return
 
 	// 1. B航路の経由島（緑の小島）をすべて収集
-	type Point struct { x, y int }
+	type Point struct{ x, y int }
 	var routeIslands []Point
 
 	for x := 0; x < w; x++ {
