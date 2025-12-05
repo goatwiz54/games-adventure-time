@@ -1,10 +1,6 @@
 // filename: combat.go
 package main
 
-import (
-	"fmt"
-)
-
 // 敵のターン処理 (AI)
 func (g *Game) ProcessEnemyTurn() {
 	leader := g.Party.Leader
@@ -91,5 +87,4 @@ func (g *Game) StartCombat(e *Enemy) {
 	g.Party.InCombat = true
 	g.Party.CombatLog = "ENCOUNTER! Press [R] to Reset."
 	g.Log = append(g.Log, "Battle Started!")
-	fmt.Println("Combat Started with Enemy ID:", e.ID)
 }

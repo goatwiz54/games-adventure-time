@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -12,8 +11,6 @@ func applyIntSetting(settings map[string]string, key string, target *int) {
 	if valStr, ok := settings[key]; ok {
 		if valInt, err := strconv.Atoi(valStr); err == nil {
 			*target = valInt
-		} else {
-			fmt.Printf("Warning: Setting '%s' is not an integer: %v\n", key, err)
 		}
 	}
 }
@@ -23,8 +20,6 @@ func applyFloatSetting(settings map[string]string, key string, target *float64) 
 	if valStr, ok := settings[key]; ok {
 		if valFloat, err := strconv.ParseFloat(valStr, 64); err == nil {
 			*target = valFloat
-		} else {
-			fmt.Printf("Warning: Setting '%s' is not a float: %v\n", key, err)
 		}
 	}
 }
@@ -37,8 +32,6 @@ func applyBoolSetting(settings map[string]string, key string, target *bool) {
 			*target = true
 		} else if valStr == "false" || valStr == "off" || valStr == "0" {
 			*target = false
-		} else {
-			fmt.Printf("Warning: Setting '%s' is not a boolean: %s\n", key, valStr)
 		}
 	}
 }
@@ -64,6 +57,4 @@ func (g *Game) ApplySettings(settings map[string]string) {
 
 	// Bool Settings
 	applyBoolSetting(settings, "Centering", &g.EnableCentering)
-	
-	fmt.Println("Settings applied from file. SoilMin:", g.SoilMin)
 }

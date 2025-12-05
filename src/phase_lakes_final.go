@@ -7,11 +7,11 @@ import (
 )
 
 func (g *Game) PhaseLakesFinal(w, h int, rng *rand.Rand, gen *World2Generator) {
-	gen.CurrentStep++ // 23
-	gen.PhaseName = "10. Lakes & Done"
 	reached := make([][]bool, w)
-	for x := range reached { reached[x] = make([]bool, h) }
-	type P struct { x, y int }
+	for x := range reached {
+		reached[x] = make([]bool, h)
+	}
+	type P struct{ x, y int }
 	queue := []P{}
 	for x := 0; x < w; x++ {
 		for y := 0; y < h; y++ {

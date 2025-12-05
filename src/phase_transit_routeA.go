@@ -6,17 +6,19 @@ import (
 	"math/rand"
 )
 
-// 航路探索A - 新しい航路生成方式
+// PhaseTransitRouteA - 航路探索A（深海迂回航路）
+// 深海が配置された後、島から大陸の港への迂回航路を生成する
 func (g *Game) PhaseTransitRouteA(w, h int, rng *rand.Rand, gen *World2Generator) {
-	gen.PhaseName = "12. Transit Route A (New Method)"
-
 	// 大島データがない場合はスキップ
 	if len(gen.Islands) == 0 {
 		gen.PhaseName += " (No islands found)"
 		return
 	}
 
-	// PinkRectsをクリアして新規描画
+	// TODO: 深海を迂回する航路探索アルゴリズムを実装
+	// 現在の実装は一時的なプレースホルダー
+
+	// PinkRectsをクリア（深海フェーズで使用済み）
 	g.World2.PinkRects = []Rect{}
 
 	// すべての大島に対して処理を実行
@@ -25,74 +27,81 @@ func (g *Game) PhaseTransitRouteA(w, h int, rng *rand.Rand, gen *World2Generator
 		cpX := island.CenterX
 		cpY := island.CenterY
 
-		// CPを起点に円を描き、大陸の最初に一致した「土」を仮の港SP (Sea Port)とする
-		// 北東南西の順番で判定
+		// CPを起点に円を描き、大陸の港を探す
+		// TODO: 深海を考慮した港探索に変更
 		type PortInfo struct {
 			x, y int
 			dist float64
 		}
 
-		var seaPort *PortInfo
+		var harbor *PortInfo
 
-		// 北東南西の方向を定義
-		directions := []struct {
-			name  string
-			check func(angle float64) bool
-		}{
-			{"North", func(angle float64) bool { return angle >= 225 && angle < 315 }}, // 北 (上方向)
-			{"East", func(angle float64) bool { return angle >= 315 || angle < 45 }},   // 東 (右方向)
-			{"South", func(angle float64) bool { return angle >= 45 && angle < 135 }},  // 南 (下方向)
-			{"West", func(angle float64) bool { return angle >= 135 && angle < 225 }},  // 西 (左方向)
-		}
+		// アルキメデスの螺旋探索 (Archimedean spiral)
+		// r = b * theta (thetaは累積ラジアン)
+		// 北(-90度)から開始し、時計回りに探索
 
-		// 円を拡大しながら大陸の土を探す（北東南西の順番）
-		maxRadius := int(math.Sqrt(float64(w*w + h*h)))
-		for _, dir := range directions {
-			found := false
-			for radius := 1; radius <= maxRadius && !found; radius++ {
-				// 円周上の点を1度刻みでチェック
-				for angle := 0.0; angle < 360.0; angle += 1.0 {
-					if !dir.check(angle) {
-						continue // 指定方向でない場合はスキップ
-					}
+		maxDist := math.Sqrt(float64(w*w + h*h))
 
-					rad := angle * math.Pi / 180.0
-					x := cpX + int(float64(radius)*math.Cos(rad))
-					y := cpY + int(float64(radius)*math.Sin(rad))
+		// 螺旋のパラメータ
+		// 1回転(2*PI)で半径がどれくらい増えるか (ピッチ)
+		// ピッチを1.0に設定（1回転で半径が1マス増える＝隙間なく探索）
+		pitch := 1.0
+		b := pitch / (2 * math.Pi)
 
-					if x >= 0 && x < w && y >= 0 && y < h {
-						tile := g.World2.Tiles[x][y]
-						// 大陸の土のみ（SrcMain または SrcSub）を探す
-						// ランダム5点島、経由島、大島は除外
-						if tile.Type == W2TileSoil && (tile.Source == SrcMain || tile.Source == SrcSub) {
-							dist := math.Sqrt(float64((x-cpX)*(x-cpX) + (y-cpY)*(y-cpY)))
-							seaPort = &PortInfo{x: x, y: y, dist: dist}
-							found = true
-							break
-						}
-					}
+		// thetaを増やしながら探索
+		// thetaの増分は、半径に応じて調整する（外側ほど細かくして、ステップ距離を一定に保つ）
+		// ds = r * d_theta => d_theta = ds / r
+		// ds (ステップ距離) は 0.5 程度にして、タイルの取りこぼしを防ぐ
+
+		currentTheta := 0.0
+		startAngleOffset := -math.Pi / 2.0 // 北(-90度)から開始
+
+		// 無限ループ防止のため、最大回転数を設定（念のため）
+		maxTheta := maxDist / b
+
+		for currentTheta <= maxTheta {
+			r := b * currentTheta
+
+			// 実際の角度
+			angle := currentTheta + startAngleOffset
+
+			x := cpX + int(r*math.Cos(angle))
+			y := cpY + int(r*math.Sin(angle))
+
+			if x >= 0 && x < w && y >= 0 && y < h {
+				tile := g.World2.Tiles[x][y]
+				// 大陸の土のみ（SrcMain または SrcSub）を探す
+				if tile.Type == W2TileSoil && (tile.Source == SrcMain || tile.Source == SrcSub) {
+					dist := math.Sqrt(float64((x-cpX)*(x-cpX) + (y-cpY)*(y-cpY)))
+					harbor = &PortInfo{x: x, y: y, dist: dist}
+					break
 				}
 			}
-			if found {
-				break // 北東南西の順で最初に見つかった方向でSPが確定
+
+			// 次のステップ
+			if r < 1.0 {
+				currentTheta += 0.5 // 半径が小さいときは粗くても良い（中心付近）
+			} else {
+				currentTheta += 0.5 / r // ステップ距離0.5を維持
 			}
 		}
 
-		if seaPort == nil {
+		if harbor == nil {
 			// この島には大陸への港が見つからなかった（スキップ）
 			continue
 		}
 
-		// CP-SPの直線距離をFT (First Distance)とする
-		ft := seaPort.dist
+		// CP-港の直線距離をFT (First Distance)とする
+		ft := harbor.dist
 
-		// CP-SPの辺を基準に、FT距離の2倍の長さの長方形を描く
-		// rect1: CP-SP方向
+		// CP-港の辺を基準に、FT距離の2倍の長さの長方形を描く（一時的なプレースホルダー）
+		// TODO: 深海迂回航路に変更
+		// rect1: CP-港方向
 		// rect2: 反対方向
 
-		// CP-SPのベクトルを計算
-		dx := seaPort.x - cpX
-		dy := seaPort.y - cpY
+		// CP-港のベクトルを計算
+		dx := harbor.x - cpX
+		dy := harbor.y - cpY
 
 		// ベクトルの長さで正規化
 		length := math.Sqrt(float64(dx*dx + dy*dy))

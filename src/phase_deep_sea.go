@@ -6,12 +6,10 @@ import (
 	"math/rand"
 )
 
-// Phase_DeepSea: 深海処理
-// 各大島に対して、赤ベルトの中心に楕円形の深海エリアを生成
+// PhaseDeepSea: 深海処理
+// 各大島に対して、深海ベルトを計算し、その中心に楕円形の深海エリアを生成
 func (g *Game) PhaseDeepSea(w, h int, rng *rand.Rand, gen *World2Generator) {
-	gen.PhaseName = "13. Deep Sea Processing (Ellipses)"
-
-	// 大島データがない場合はスキップ
+	// 深海領域の生成（楕円形）大島データがない場合はスキップ
 	if len(gen.Islands) == 0 {
 		gen.PhaseName += " (No islands found)"
 		return
@@ -22,9 +20,9 @@ func (g *Game) PhaseDeepSea(w, h int, rng *rand.Rand, gen *World2Generator) {
 		cpX := island.CenterX
 		cpY := island.CenterY
 
-		// CP-SP方向を再計算（Phase_Transit_RouteAと同じロジック）
-		var seaPortX, seaPortY int
-		var foundPort bool
+		// CP-DSP方向を計算（大陸との深海候補点を探す）
+		var deepSeaPointX, deepSeaPointY int
+		var foundDSP bool
 
 		// 北東南西の方向を定義
 		directions := []struct {
@@ -54,8 +52,8 @@ func (g *Game) PhaseDeepSea(w, h int, rng *rand.Rand, gen *World2Generator) {
 					if x >= 0 && x < w && y >= 0 && y < h {
 						tile := g.World2.Tiles[x][y]
 						if tile.Type == W2TileSoil && (tile.Source == SrcMain || tile.Source == SrcSub) {
-							seaPortX, seaPortY = x, y
-							foundPort = true
+							deepSeaPointX, deepSeaPointY = x, y
+							foundDSP = true
 							found = true
 							break
 						}
@@ -67,13 +65,13 @@ func (g *Game) PhaseDeepSea(w, h int, rng *rand.Rand, gen *World2Generator) {
 			}
 		}
 
-		if !foundPort {
+		if !foundDSP {
 			continue
 		}
 
-		// CP-SPのベクトルを計算
-		dx := seaPortX - cpX
-		dy := seaPortY - cpY
+		// CP-DSPのベクトルを計算
+		dx := deepSeaPointX - cpX
+		dy := deepSeaPointY - cpY
 		length := math.Sqrt(float64(dx*dx + dy*dy))
 
 		if length == 0 {
@@ -88,27 +86,27 @@ func (g *Game) PhaseDeepSea(w, h int, rng *rand.Rand, gen *World2Generator) {
 		perpDx := -normDy
 		perpDy := normDx
 
-		// 赤ベルトの長さ（FT * 2）
-		redBeltLength := int(length * 2)
+		// 深海ベルトの長さ（FT * 2）
+		deepSeaBeltLength := int(length * 2)
 
-		// 赤ベルトの幅（固定10マス）
-		redBeltWidth := 10
+		// 深海ベルトの幅（固定10マス）
+		deepSeaBeltWidth := 10
 
-		// 楕円のサイズ（赤帯に対して垂直に描画）
-		// 楕円の長軸：赤帯の幅を超えて垂直方向に伸びる（30〜50マス）
-		ellipseMajorAxis := redBeltWidth * (3 + rng.Intn(3)) // 30〜50マス
+		// 楕円のサイズ（深海ベルトに対して垂直に描画）
+		// 楕円の長軸：深海ベルトの幅を超えて垂直方向に伸びる（30〜50マス）
+		ellipseMajorAxis := deepSeaBeltWidth * (3 + rng.Intn(3)) // 30〜50マス
 
-		// 楕円の短軸：赤ベルトの長さの1/3〜1/2
+		// 楕円の短軸：深海ベルトの長さの1/3〜1/2
 		ellipseRatio := 0.33 + rng.Float64()*0.17 // 0.33 〜 0.5
-		ellipseMinorAxis := int(float64(redBeltLength) * ellipseRatio)
+		ellipseMinorAxis := int(float64(deepSeaBeltLength) * ellipseRatio)
 
-		// 赤ベルトの中心点を計算（CP-SP間の中間点）
+		// 深海ベルトの中心点を計算（CP-DSP間の中間点）
 		midX := cpX + int(normDx*length/2)
 		midY := cpY + int(normDy*length/2)
 
-		// 楕円を描画（赤帯に対して垂直方向に伸びる）
+		// 楕円を描画（深海ベルトに対して垂直方向に伸びる）
 		// 長軸 = 垂直方向（perpDx, perpDy）
-		// 短軸 = CP-SP方向（normDx, normDy）
+		// 短軸 = CP-DSP方向（normDx, normDy）
 		g.drawEllipse(midX, midY, ellipseMajorAxis, ellipseMinorAxis, perpDx, perpDy, w, h)
 	}
 

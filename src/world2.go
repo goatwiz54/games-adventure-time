@@ -29,13 +29,41 @@ func (g *Game) InitWorld2Generator() {
 		return
 	}
 
+	// Phases配列を初期化
+	phases := InitPhases()
+
+	// Layers配列を確保
+	layers := make([]Layer, len(phases))
+	for i := range layers {
+		layers[i].Tiles = make([][]World2Tile, g.W2Width)
+		for x := 0; x < g.W2Width; x++ {
+			layers[i].Tiles[x] = make([]World2Tile, g.W2Height)
+			for y := 0; y < g.W2Height; y++ {
+				layers[i].Tiles[x][y] = World2Tile{IsEmpty: true}
+			}
+		}
+		layers[i].IsComplete = false
+	}
+
+	// Tiles配列を確保（初期状態：空）
+	tiles := make([][]World2Tile, g.W2Width)
+	for x := 0; x < g.W2Width; x++ {
+		tiles[x] = make([]World2Tile, g.W2Height)
+		for y := 0; y < g.W2Height; y++ {
+			tiles[x][y] = World2Tile{IsEmpty: true}
+		}
+	}
+
 	g.World2 = &WorldMap2{
-		Width:     g.W2Width,
-		Height:    g.W2Height,
-		Tiles:     make([][]World2Tile, g.W2Width),
-		OffsetX:   float64(g.W2Width * World2TileSize / 2),
-		OffsetY:   float64(g.W2Height * World2TileSize / 2),
-		PinkRects: []Rect{},
+		Width:           g.W2Width,
+		Height:          g.W2Height,
+		Tiles:           tiles,
+		Phases:          phases,
+		Layers:          layers,
+		CurrentLayerIdx: 0,
+		OffsetX:         float64(g.W2Width * World2TileSize / 2),
+		OffsetY:         float64(g.W2Height * World2TileSize / 2),
+		PinkRects:       []Rect{},
 	}
 
 	mapPixelW := float64(g.W2Width * World2TileSize)
@@ -76,154 +104,12 @@ func (g *Game) InitWorld2Generator() {
 		Islands:    []IslandData{}, // 島データを初期化
 	}
 
-	for x := 0; x < g.W2Width; x++ {
-		g.World2.Tiles[x] = make([]World2Tile, g.W2Height)
-		for y := 0; y < g.W2Height; y++ {
-			if x < 3 || x >= g.W2Width-3 || y < 3 || y >= g.W2Height-3 {
-				g.World2.Tiles[x][y] = World2Tile{Type: W2TileFixedOcean}
-			} else {
-				g.World2.Tiles[x][y] = World2Tile{Type: W2TileVariableOcean}
-			}
-		}
-	}
-
 	g.Gen2 = gen
 	g.TotalRoute1Dist = 0.0 // 初期化
 	g.Gen2.UpdateMaskImage(g.W2Width, g.W2Height)
-	g.SaveSnapshot()
-}
 
-func (g *Game) SaveSnapshot() {
-	w, h := g.Gen2.Config.W, g.Gen2.Config.H
-	tilesCopy := make([][]World2Tile, w)
-	for x := 0; x < w; x++ {
-		tilesCopy[x] = make([]World2Tile, h)
-		copy(tilesCopy[x], g.World2.Tiles[x])
-	}
-
-	newSoilsCopy := make(map[int]bool)
-	for k, v := range g.Gen2.NewSoils {
-		newSoilsCopy[k] = v
-	}
-
-	exCopy := make(map[int]bool)
-	for k, v := range g.Gen2.Excluded {
-		exCopy[k] = v
-	}
-
-	pinkCopy := make([]Rect, len(g.World2.PinkRects))
-	copy(pinkCopy, g.World2.PinkRects)
-
-	walkersCopy := make([]struct{ x, y int }, len(g.Gen2.Walkers))
-	copy(walkersCopy, g.Gen2.Walkers)
-
-	g.Gen2.History = append(g.Gen2.History, GenSnapshot{
-		Tiles:            tilesCopy,
-		PhaseName:        g.Gen2.PhaseName,
-		StepID:           g.Gen2.CurrentStep,
-		NewSoils:         newSoilsCopy,
-		Excluded:         exCopy,
-		Multiplier:       g.Gen2.Multiplier,
-		PinkRects:        pinkCopy,
-		Walkers:          walkersCopy,
-		CurrentSoilCount: g.Gen2.CurrentSoilCount,
-		CurrentSeed:      g.Gen2.CurrentSeed,
-		CliffStreak:      g.Gen2.CliffStreak,
-		ShallowStreak:    g.Gen2.ShallowStreak,
-	})
-}
-
-func (g *Game) UndoStep() {
-	if len(g.Gen2.History) > 1 {
-		g.Gen2.History = g.Gen2.History[:len(g.Gen2.History)-1]
-		last := g.Gen2.History[len(g.Gen2.History)-1]
-
-		for x := 0; x < g.Gen2.Config.W; x++ {
-			copy(g.World2.Tiles[x], last.Tiles[x])
-		}
-
-		g.Gen2.PhaseName = last.PhaseName
-		g.Gen2.CurrentStep = last.StepID
-		g.Gen2.IsFinished = false
-
-		g.Gen2.NewSoils = make(map[int]bool)
-		for k, v := range last.NewSoils {
-			g.Gen2.NewSoils[k] = v
-		}
-
-		g.Gen2.Excluded = make(map[int]bool)
-		for k, v := range last.Excluded {
-			g.Gen2.Excluded[k] = v
-		}
-
-		g.World2.PinkRects = make([]Rect, len(last.PinkRects))
-		copy(g.World2.PinkRects, last.PinkRects)
-
-		g.Gen2.Walkers = make([]struct{ x, y int }, len(last.Walkers))
-		copy(g.Gen2.Walkers, last.Walkers)
-
-		g.Gen2.CurrentSoilCount = last.CurrentSoilCount
-		g.Gen2.Multiplier = last.Multiplier
-		g.Gen2.CurrentSeed = last.CurrentSeed
-		g.Gen2.Rng.Seed(g.Gen2.CurrentSeed)
-		g.Gen2.CliffStreak = last.CliffStreak
-		g.Gen2.ShallowStreak = last.ShallowStreak
-	}
-}
-
-// NextStep のラッパー
-func (g *Game) NextStep() {
-	if g.Gen2.IsFinished {
-		return
-	}
-
-	gen := g.Gen2
-	w, h := gen.Config.W, gen.Config.H
-
-	gen.Rng.Seed(gen.CurrentSeed)
-	rng := gen.Rng
-
-	gen.NewSoils = make(map[int]bool)
-	g.World2.PinkRects = []Rect{}
-
-	switch gen.CurrentStep {
-	case Phase_Init:
-		g.PhaseInit(w, h, rng, gen)
-	case Phase_MaskGen:
-		g.PhaseMaskGen(w, h, rng, gen)
-	case Phase_SoilStart, 3, 4, 5, 6, 7, 8, 9, 10, Phase_SoilProgressEnd:
-		g.PhaseSoilProgress(w, h, rng, gen)
-	case Phase_Bridge:
-		g.PhaseBridge(w, h, rng, gen)
-	case Phase_Centering:
-		g.PhaseCentering(w, h, rng, gen)
-	case Phase_IslandsQuad:
-		g.PhaseIslandsQuad(w, h, rng, gen)
-	case Phase_IslandsRand:
-		g.PhaseIslandsRand(w, h, rng, gen)
-	case Phase_Transit_Start:
-		g.PhaseTransitStart(w, h, rng, gen)
-	case Phase_IslandShallowAdjust:
-		g.PhaseIslandShallowAdjust(w, h, rng, gen)
-	case Phase_Transit_Route1:
-		g.PhaseTransitRoute1(w, h, rng, gen)
-	case Phase_Transit_Route2_Calc:
-		g.PhaseTransitRoute2Calc(w, h, rng, gen)
-	case Phase_Transit_Route2_Draw:
-		g.PhaseTransitRoute2Draw(w, h, rng, gen)
-	case Phase_Transit_RouteA:
-		g.PhaseTransitRouteA(w, h, rng, gen)
-	case Phase_DeepSea:
-		g.PhaseDeepSea(w, h, rng, gen)
-	case Phase_CliffsShallows:
-		g.PhaseCliffsShallows(w, h, rng, gen)
-	case Phase_LakesFinal:
-		g.PhaseLakesFinal(w, h, rng, gen)
-	}
-
-	gen.CurrentStep++                 // 各フェーズの処理メソッド内で次のフェーズに移行するロジックを削除したため、ここでインクリメント
-	gen.CurrentSeed = gen.Rng.Int63() // Save next seed
-	g.SaveSnapshot()
+	// 最初のフェーズを実行
+	g.ExecuteCurrentPhase()
 }
 
 // UpdateWorld2 は main.go から参照されるため、ここに残す
@@ -245,44 +131,40 @@ func (g *Game) UpdateWorld2() error {
 
 	// ** Rキーは最優先でリセット **
 	if inpututil.IsKeyJustPressed(ebiten.KeyR) {
-		g.InitWorld2Generator() // Reset
+		g.OnResetGeneration() // 新システムでリセット
 		return nil
 	}
 
 	// Enter キーの処理 (UI編集モード以外)
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) && g.InputMode == EditNone {
-
-		// Phase 10 (IsFinished) の場合はリセットして自動進行開始
+		// 完了済みの場合はリセットして自動進行開始
 		if g.Gen2.IsFinished {
-			g.InitWorld2Generator()
-			g.AutoProgress = true
-			g.SuppressMapDraw = true
-		} else {
-			// 自動進行モードを開始
-			g.AutoProgress = true
-			g.SuppressMapDraw = true
+			g.OnResetGeneration()
 		}
-	}
-
-	// 自動進行モード: 1フレームごとに1フェーズ進める
-	if g.AutoProgress && !g.Gen2.IsFinished {
-		g.NextStep()
-	}
-
-	// 生成完了時に自動進行を停止し、マップ描画を再開
-	if g.Gen2.IsFinished && g.AutoProgress {
-		g.AutoProgress = false
-		g.SuppressMapDraw = false
+		// 自動進行開始
+		g.OnEnterKey()
 	}
 
 	// PgDn/PgUp (UI編集モード以外)
 	if g.InputMode == EditNone {
 		if inpututil.IsKeyJustPressed(ebiten.KeyPageDown) {
-			g.NextStep()
+			g.OnPageDown()
 		}
 		if inpututil.IsKeyJustPressed(ebiten.KeyPageUp) {
-			g.UndoStep()
+			g.OnPageUp()
 		}
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyF5) {
+		// F5: 設定ファイル強制リロード + 現在のフェーズをリセット・再実行
+		settings, err := LoadSettings("settings.txt")
+		if err == nil {
+			g.ApplySettings(settings)
+		}
+		currentLayer := &g.World2.Layers[g.World2.CurrentLayerIdx]
+		currentPhase := g.World2.Phases[g.World2.CurrentLayerIdx]
+		currentPhase.Processor.Reset(g, currentLayer, g.World2.CurrentLayerIdx, g.W2Width, g.W2Height, g.Gen2.Rng, g.Gen2)
+		g.ExecuteCurrentPhase()
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyF12) {
@@ -490,31 +372,28 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 				// --- タイルカラー判定 ---
 				switch tile.Type {
 				case W2TileSoil:
-					if g.Gen2.NewSoils[y*w+x] {
-						c = color.RGBA{210, 180, 140, 255}
-					} else {
-						switch tile.Source {
-						case SrcMain:
-							c = color.RGBA{180, 100, 80, 255}
-						case SrcSub:
-							c = color.RGBA{100, 160, 80, 255}
-						case SrcMix:
-							c = color.RGBA{160, 100, 160, 255}
-						case SrcBridge:
-							c = color.RGBA{150, 150, 160, 255}
-						case SrcIsland:
-							c = color.RGBA{230, 190, 100, 255}
-						case SrcBRouteIsland:
-							c = color.RGBA{100, 180, 100, 255} // B航路の経由島（緑）
-						default:
-							c = color.RGBA{139, 69, 19, 255}
-						}
+					// NewSoils判定を削除して常に色を表示
+					switch tile.Source {
+					case SrcMain:
+						c = color.RGBA{180, 100, 80, 255}
+					case SrcSub:
+						c = color.RGBA{100, 160, 80, 255}
+					case SrcMix:
+						c = color.RGBA{160, 100, 160, 255}
+					case SrcBridge:
+						c = color.RGBA{150, 150, 160, 255}
+					case SrcIsland:
+						c = color.RGBA{230, 190, 100, 255}
+					case SrcBRouteIsland:
+						c = color.RGBA{100, 180, 100, 255} // B航路の経由島（緑）
+					default:
+						c = color.RGBA{139, 69, 19, 255}
 					}
 				case W2TileVariableOcean:
 					if tile.IsLake {
 						c = color.RGBA{60, 100, 200, 255}
 					} else {
-						c = color.RGBA{30, 60, 180, 255}
+						c = color.RGBA{30, 60, 180, 255} // 可変海（青）
 					}
 					// 航路の色付け
 					if tile.Source == SrcTransitPath {
@@ -524,7 +403,7 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 						c = color.RGBA{50, 120, 80, 255} // B航路（暗緑）
 					}
 				case W2TileFixedOcean:
-					c = color.RGBA{10, 20, 80, 255}
+					c = color.RGBA{10, 20, 80, 255} // 固定海（暗い青）
 				case W2TileTransit:
 					if tile.Source == SrcBRouteIsland {
 						c = color.RGBA{100, 180, 100, 255} // B航路の経由島（緑）
@@ -545,8 +424,15 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 					c = color.RGBA{255, 255, 0, 255} // 深海（デバッグ用：黄色）
 				case W2TileVeryDeepSea:
 					c = color.RGBA{255, 128, 0, 255} // 大深海（デバッグ用：オレンジ）
+				default:
+					// デフォルト：背景色と同じ（描画しない）
+					c = color.RGBA{10, 10, 30, 255}
 				}
-				ebitenutil.DrawRect(screen, sx, sy, size+1, size+1, c)
+
+				// cが設定されている場合のみ描画
+				if c != nil {
+					ebitenutil.DrawRect(screen, sx, sy, size+1, size+1, c)
+				}
 				// --- タイルカラー判定 終 ---
 
 				if g.World2.ShowGrid || tile.Type == W2TileTransit {
@@ -559,30 +445,8 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 					}
 				}
 
-				// Gen Mask Imageの描画
-				if g.Gen2.CurrentStep <= Phase_SoilStart && g.Gen2.FinalMask != nil {
-					val := g.Gen2.FinalMask[x][y]
-					if val > 0 {
-						gray := uint8(val * 255)
-						ebitenutil.DrawRect(screen, sx, sy, size+1, size+1, color.RGBA{gray, gray, gray, 100})
-					}
-				}
 			}
 		}
-
-		// --- ポーズ中の強調描画 (航路探索Aでも使用) ---
-		if len(g.World2.PinkRects) > 0 {
-			for _, rect := range g.World2.PinkRects {
-				sx := (float64(rect.x)*float64(World2TileSize)-g.World2.OffsetX)*g.World2.Zoom + ScreenWidth/2
-				sy := (float64(rect.y)*float64(World2TileSize)-g.World2.OffsetY)*g.World2.Zoom + ScreenHeight/2
-				w := float64(rect.w) * g.World2.Zoom
-				h := float64(rect.h) * g.World2.Zoom
-
-				// 赤の半透明の矩形を描画（航路探索A用）
-				ebitenutil.DrawRect(screen, sx, sy, w, h, color.RGBA{255, 80, 80, 128})
-			}
-		}
-		// --- 強調描画 終 ---
 	} // if !g.SuppressMapDraw の閉じ括弧
 
 	vectorY := 20
@@ -647,5 +511,10 @@ func (g *Game) DrawWorld2(screen *ebiten.Image) {
 	drawInputBox(540, "Force Turn", g.ForceSwitch, EditForceSwitch)
 
 	text.Draw(screen, "[PgDn] Next, [PgUp] Back, [Enter] All", basicfont.Face7x13, 10, 670, color.White)
-	text.Draw(screen, "[Drag]: Move, [Ctrl+Wheel]: Zoom, [R]: Reset", basicfont.Face7x13, 10, ScreenHeight-20, color.White)
+	text.Draw(screen, "[Drag]: Move, [Ctrl+Wheel]: Zoom, [R]: Reset, [F5]: Reload Settings", basicfont.Face7x13, 10, ScreenHeight-20, color.White)
+
+	// 作業タイルの描画（港候補点と螺旋探索点）
+	if !g.SuppressMapDraw {
+		DrawWorkTiles(screen, g, g.World2.CurrentLayerIdx)
+	}
 }

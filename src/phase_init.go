@@ -6,7 +6,25 @@ import (
 )
 
 func (g *Game) PhaseInit(w, h int, rng *rand.Rand, gen *World2Generator) {
-	gen.PhaseName = "1. Generating Mask (Type 1)"
+	// 初期化処理（将来的に他の初期化処理を追加する可能性あり）
+}
 
-	// Phase_Init のロジック本体は InitWorld2Generator() にて実行済み
+func (g *Game) PhaseSea(w, h int, rng *rand.Rand, gen *World2Generator) {
+	// 可変海で全体を初期化
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			g.World2.Tiles[x][y] = World2Tile{Type: W2TileVariableOcean}
+		}
+	}
+}
+
+func (g *Game) PhaseFixedSea(w, h int, rng *rand.Rand, gen *World2Generator) {
+	// 外周3マスを固定海に設定
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			if x < 3 || x >= w-3 || y < 3 || y >= h-3 {
+				g.World2.Tiles[x][y] = World2Tile{Type: W2TileFixedOcean}
+			}
+		}
+	}
 }
